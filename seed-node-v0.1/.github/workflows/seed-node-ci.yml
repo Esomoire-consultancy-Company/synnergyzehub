@@ -1,0 +1,27 @@
+name: Seed Node CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  api-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check files
+        run: |
+          test -f seed-node-v0.1/README.md
+          test -f seed-node-v0.1/packages/database/init.sql
+          test -f seed-node-v0.1/apps/api/app/main.py
+
+      - name: Validate Docker Compose file exists
+        run: |
+          test -f seed-node-v0.1/infra/docker-compose.yml
