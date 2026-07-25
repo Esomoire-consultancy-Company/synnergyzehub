@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:synnergyze:riveros:event:v0.2",
+  "title": "RiverOS Event Envelope v0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "event_version",
+    "workspace_id",
+    "source_system",
+    "object_type",
+    "object_id",
+    "action",
+    "status",
+    "trace_id",
+    "occurred_at"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "event_version": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+$"
+    },
+    "stream_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "organisation_id": {
+      "type": ["string", "null"]
+    },
+    "arc_id": {
+      "type": ["string", "null"]
+    },
+    "licence_id": {
+      "type": ["string", "null"]
+    },
+    "source_system": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "source_environment": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "source_event_ref": {
+      "type": ["string", "null"],
+      "maxLength": 255
+    },
+    "idempotency_key": {
+      "type": ["string", "null"],
+      "maxLength": 255
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor_type": {
+          "type": ["string", "null"],
+          "enum": ["user", "agent", "device", "system", "service", null]
+        },
+        "actor_id": {
+          "type": ["string", "null"]
+        },
+        "digitalme_principal": {
+          "type": ["string", "null"]
+        },
+        "agent_id": {
+          "type": ["string", "null"]
+        },
+        "device_id": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "object_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "object_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "workflow_id": {
+      "type": ["string", "null"]
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "previous_state": {
+      "type": ["object", "null"]
+    },
+    "new_state": {
+      "type": ["object", "null"]
+    },
+    "authority_basis": {
+      "type": "object"
+    },
+    "consent_context": {
+      "type": "object"
+    },
+    "dam_decision_id": {
+      "type": ["string", "null"]
+    },
+    "commercial_relevance": {
+      "type": "boolean",
+      "default": false
+    },
+    "settlement_eligibility": {
+      "type": "string",
+      "enum": [
+        "not_applicable",
+        "not_eligible",
+        "pending",
+        "eligible",
+        "revoked"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "RECEIVED",
+        "VALIDATING",
+        "VERIFIED",
+        "ACCEPTED",
+        "APPLIED",
+        "SETTLEMENT_ELIGIBLE",
+        "CLOSED",
+        "REJECTED",
+        "QUARANTINED",
+        "DISPUTED",
+        "SUSPENDED",
+        "REVERSED",
+        "SUPERSEDED"
+      ]
+    },
+    "trace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlation_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "causation_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "relation_type"],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "supports",
+              "observes",
+              "authorises",
+              "contradicts",
+              "replaces",
+              "settles"
+            ]
+          },
+          "checksum": {
+            "type": ["string", "null"]
+          },
+          "storage_uri": {
+            "type": ["string", "null"],
+            "format": "uri-reference"
+          }
+        }
+      }
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "observed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "received_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "effective_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "recorded_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "location": {
+      "type": "object"
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "event_hash": {
+      "type": ["string", "null"]
+    },
+    "signature": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}
