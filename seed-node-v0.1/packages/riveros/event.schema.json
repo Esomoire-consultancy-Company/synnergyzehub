@@ -17,6 +17,32 @@
     "trace_id",
     "occurred_at"
   ],
+  "anyOf": [
+    {
+      "required": [
+        "source_event_ref"
+      ],
+      "properties": {
+        "source_event_ref": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*"
+        }
+      }
+    },
+    {
+      "required": [
+        "idempotency_key"
+      ],
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*"
+        }
+      }
+    }
+  ],
   "properties": {
     "event_id": {
       "type": "string",
@@ -41,13 +67,22 @@
       "format": "uuid"
     },
     "organisation_id": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "arc_id": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "licence_id": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "source_system": {
       "type": "string",
@@ -55,36 +90,66 @@
       "maxLength": 160
     },
     "source_environment": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "maxLength": 120
     },
     "source_event_ref": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "maxLength": 255
     },
     "idempotency_key": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "maxLength": 255
     },
     "actor": {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "actor_type"
+      ],
       "properties": {
         "actor_type": {
-          "type": ["string", "null"],
-          "enum": ["user", "agent", "device", "system", "service", null]
+          "type": "string",
+          "enum": [
+            "user",
+            "agent",
+            "device",
+            "system",
+            "service"
+          ]
         },
         "actor_id": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "digitalme_principal": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "agent_id": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "device_id": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -99,7 +164,10 @@
       "maxLength": 255
     },
     "workflow_id": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "action": {
       "type": "string",
@@ -107,10 +175,16 @@
       "maxLength": 160
     },
     "previous_state": {
-      "type": ["object", "null"]
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "new_state": {
-      "type": ["object", "null"]
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "authority_basis": {
       "type": "object"
@@ -119,7 +193,10 @@
       "type": "object"
     },
     "dam_decision_id": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "commercial_relevance": {
       "type": "boolean",
@@ -158,11 +235,17 @@
       "format": "uuid"
     },
     "correlation_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     },
     "causation_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     },
     "evidence": {
@@ -170,7 +253,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["evidence_id", "relation_type"],
+        "required": [
+          "evidence_id",
+          "relation_type"
+        ],
         "properties": {
           "evidence_id": {
             "type": "string",
@@ -188,10 +274,16 @@
             ]
           },
           "checksum": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "storage_uri": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uri-reference"
           }
         }
@@ -202,31 +294,49 @@
       "format": "date-time"
     },
     "observed_at": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "date-time"
     },
     "received_at": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "date-time"
     },
     "effective_at": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "date-time"
     },
     "recorded_at": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "date-time"
     },
     "location": {
       "type": "object"
     },
     "confidence": {
-      "type": ["number", "null"],
+      "type": [
+        "number",
+        "null"
+      ],
       "minimum": 0,
       "maximum": 1
     },
     "event_hash": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "signature": {
       "type": "object"
