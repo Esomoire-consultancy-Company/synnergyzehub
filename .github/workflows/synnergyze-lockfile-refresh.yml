@@ -1,0 +1,51 @@
+name: Synnergyze Lockfile Refresh
+
+on:
+  push:
+    branches:
+      - 'dependabot/npm_and_yarn/seed-node-v0.1/apps/web/next-15.5.21'
+    paths:
+      - 'seed-node-v0.1/apps/web/package.json'
+      - '.github/workflows/synnergyze-lockfile-refresh.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: synnergyze-lockfile-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    if: github.ref_name == 'dependabot/npm_and_yarn/seed-node-v0.1/apps/web/next-15.5.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: dependabot/npm_and_yarn/seed-node-v0.1/apps/web/next-15.5.21
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate the exact lockfile
+        working-directory: seed-node-v0.1/apps/web
+        run: npm install --package-lock-only --ignore-scripts --no-fund
+
+      - name: Commit lockfile when changed
+        run: |
+          if git diff --quiet -- seed-node-v0.1/apps/web/package-lock.json \
+            && git ls-files --error-unmatch seed-node-v0.1/apps/web/package-lock.json >/dev/null 2>&1; then
+            echo 'Lockfile already matches package.json.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add seed-node-v0.1/apps/web/package-lock.json
+          git commit -m 'build: lock Synnergyze web dependency graph'
+          git push origin HEAD:dependabot/npm_and_yarn/seed-node-v0.1/apps/web/next-15.5.21
