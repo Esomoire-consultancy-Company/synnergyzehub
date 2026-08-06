@@ -56,6 +56,14 @@ jobs:
       - name: Install isolated dependency graph
         run: npm install --ignore-scripts --no-fund
 
+      - name: Upload generated lockfile evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: synnergyze-web-package-lock
+          path: seed-node-v0.1/apps/web/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build production application
         run: npm run build
 
