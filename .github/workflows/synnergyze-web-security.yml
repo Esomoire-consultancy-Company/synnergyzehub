@@ -1,0 +1,63 @@
+name: Synnergyze Web Security
+
+on:
+  pull_request:
+    paths:
+      - 'seed-node-v0.1/apps/web/**'
+      - '.github/workflows/synnergyze-web-security.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'seed-node-v0.1/apps/web/**'
+      - '.github/workflows/synnergyze-web-security.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: seed-node-v0.1/apps/web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate exact direct dependency versions
+        run: |
+          node - <<'NODE'
+          const pkg = require('./package.json')
+          const errors = []
+          for (const section of ['dependencies', 'devDependencies']) {
+            for (const [name, version] of Object.entries(pkg[section] || {})) {
+              if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+                errors.push(`${section}.${name} is not exact: ${version}`)
+              }
+            }
+          }
+          if (pkg.dependencies?.next !== '15.5.21') {
+            errors.push(`next must be exactly 15.5.21, got ${pkg.dependencies?.next}`)
+          }
+          if (errors.length) {
+            console.error(errors.join('\n'))
+            process.exit(1)
+          }
+          console.log('Direct dependency versions are exact and Next.js is pinned to 15.5.21.')
+          NODE
+
+      - name: Install isolated dependency graph
+        run: npm install --ignore-scripts --no-fund
+
+      - name: Build production application
+        run: npm run build
+
+      - name: Audit production dependency graph
+        run: npm audit --omit=dev --audit-level=high
