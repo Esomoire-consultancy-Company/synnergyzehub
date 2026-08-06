@@ -43,14 +43,14 @@ jobs:
               }
             }
           }
-          if (pkg.dependencies?.next !== '15.5.21') {
-            errors.push(`next must be exactly 15.5.21, got ${pkg.dependencies?.next}`)
+          if (pkg.dependencies?.next !== '16.3.0') {
+            errors.push(`next must be exactly 16.3.0, got ${pkg.dependencies?.next}`)
           }
           if (errors.length) {
             console.error(errors.join('\n'))
             process.exit(1)
           }
-          console.log('Direct dependency versions are exact and Next.js is pinned to 15.5.21.')
+          console.log('Direct dependency versions are exact and Next.js is pinned to 16.3.0.')
           NODE
 
       - name: Install isolated dependency graph
