@@ -30,39 +30,41 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: seed-node-v0.1/apps/web/package-lock.json
 
       - name: Validate exact direct dependency versions
         run: |
           node - <<'NODE'
           const pkg = require('./package.json')
+          const lock = require('./package-lock.json')
           const errors = []
           for (const section of ['dependencies', 'devDependencies']) {
             for (const [name, version] of Object.entries(pkg[section] || {})) {
               if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
                 errors.push(`${section}.${name} is not exact: ${version}`)
               }
+              const locked = lock.packages?.['']?.[section]?.[name]
+              if (locked !== version) {
+                errors.push(`${section}.${name} lock mismatch: package=${version}, lock=${locked}`)
+              }
             }
           }
           if (pkg.dependencies?.next !== '16.3.0') {
             errors.push(`next must be exactly 16.3.0, got ${pkg.dependencies?.next}`)
           }
+          if (lock.lockfileVersion !== 3) {
+            errors.push(`package-lock must use lockfileVersion 3, got ${lock.lockfileVersion}`)
+          }
           if (errors.length) {
             console.error(errors.join('\n'))
             process.exit(1)
           }
-          console.log('Direct dependency versions are exact and Next.js is pinned to 16.3.0.')
+          console.log('Direct dependencies are exact, lockfile-aligned, and Next.js is pinned to 16.3.0.')
           NODE
 
-      - name: Install isolated dependency graph
-        run: npm install --ignore-scripts --no-fund
-
-      - name: Upload generated lockfile evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: synnergyze-web-package-lock
-          path: seed-node-v0.1/apps/web/package-lock.json
-          if-no-files-found: error
-          retention-days: 7
+      - name: Install locked dependency graph
+        run: npm ci --ignore-scripts --no-fund
 
       - name: Build production application
         run: npm run build
