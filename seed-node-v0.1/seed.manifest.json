@@ -1,0 +1,28 @@
+{
+  "schema": "vsr.mcp.seed/v1",
+  "seedId": "GEN-SEED-001",
+  "name": "Genesis Capability Seed 001",
+  "version": "0.1.0",
+  "transport": "streamable-http",
+  "endpoint": "/api/mcp",
+  "capabilityClass": "read-only-discovery",
+  "tools": [
+    "seed_status",
+    "governance_contract"
+  ],
+  "governance": {
+    "discoveryIsAuthorization": false,
+    "mutatingToolsEnabled": false,
+    "wardenRequiredForFutureMutation": true,
+    "evidenceRequiredForFutureStateChange": true
+  },
+  "executionSequence": [
+    "DISCOVER",
+    "IDENTIFY",
+    "RESOLVE_REGISTRY_ID",
+    "CHECK_WARDEN",
+    "ISSUE_CAPABILITY",
+    "INVOKE_MCP",
+    "RECORD_EVIDENCE"
+  ]
+}
