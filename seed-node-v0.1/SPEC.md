@@ -2,15 +2,16 @@
 
 ## Purpose
 
-Expose the first governed, read-only VSR/Genesis MCP capability from the existing Synnergyze seed-node deployment so MCP clients can discover a canonical Seed identity and its governance boundary.
+Expose the first governed, read-only VSR/Genesis MCP capability from the existing Synnergyze repository so MCP clients can discover a canonical Seed identity and its governance boundary.
 
 ## Canonical identity
 
 - Seed ID: `GEN-SEED-001`
 - Name: `Genesis Capability Seed 001`
 - Environment: `development/preview` until promoted
-- Host application: `seed-node-v0.1/apps/web`
+- Host application: repository-root Next.js application bound to the existing `digitalme-citizen-mcp-karnataka` Vercel project
 - Transport: MCP Streamable HTTP via `/api/mcp`
+- Protocol validation: read-only `/api/mcp-selftest` performs MCP connect, `tools/list`, and `seed_status`
 
 ## Capabilities
 
@@ -44,7 +45,7 @@ The first release is intentionally read-only and contains no external side effec
 ## Promotion gates
 
 1. Build succeeds.
-2. `/api/mcp` responds as an MCP endpoint.
-3. MCP initialization and `tools/list` succeed.
-4. `seed_status` and `governance_contract` return deterministic read-only output.
+2. `/api/mcp` resolves to the MCP handler rather than a platform 404.
+3. `/api/mcp-selftest` confirms MCP initialization and `tools/list` succeed.
+4. Self-test confirms `seed_status` is callable and the advertised tools are exactly the intended read-only capabilities.
 5. Production promotion remains separate from preview validation.
