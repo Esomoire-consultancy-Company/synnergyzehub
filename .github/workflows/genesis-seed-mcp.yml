@@ -1,0 +1,81 @@
+name: Genesis Seed MCP validation
+
+on:
+  push:
+    branches:
+      - feature/genesis-seed-001
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/api/mcp/**"
+      - "app/api/mcp-selftest/**"
+      - "package.json"
+      - "vercel.json"
+      - "seed-node-v0.1/SPEC.md"
+      - "seed-node-v0.1/seed.manifest.json"
+      - ".github/workflows/genesis-seed-mcp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Start application
+        run: |
+          npm run start -- -p 3000 > /tmp/genesis-seed.log 2>&1 &
+          echo $! > /tmp/genesis-seed.pid
+
+      - name: Validate MCP protocol and tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/selftest.json
+          for attempt in {1..30}; do
+            code=$(curl -sS -o /tmp/selftest.json -w '%{http_code}' http://127.0.0.1:3000/api/mcp-selftest || true)
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/selftest.json || true
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = '/tmp/selftest.json';
+          if (!fs.existsSync(path)) throw new Error('MCP self-test produced no response');
+          const result = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (result.ok !== true) throw new Error(`MCP self-test failed: ${JSON.stringify(result)}`);
+          const actual = [...result.tools].sort();
+          const expected = ['governance_contract', 'seed_status'].sort();
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`Unexpected tool set: ${JSON.stringify(actual)}`);
+          }
+          if (!Array.isArray(result.seedStatus) || result.seedStatus.length === 0) {
+            throw new Error('seed_status returned no MCP content');
+          }
+          console.log('GEN-SEED-001 protocol validation passed:', actual.join(', '));
+          NODE
+
+      - name: Print server log on failure
+        if: failure()
+        run: cat /tmp/genesis-seed.log || true
