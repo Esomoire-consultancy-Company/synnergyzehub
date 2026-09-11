@@ -25,9 +25,7 @@ R0.4 is not a generic project-management tool. It is a deterministic manufacturi
 
 ## 2. Governing Principle
 
-A license is commercially sold only after the system can show a feasible route from configuration to production capacity, quality assurance, and deployment.
-
-The core production chain is:
+A license is commercially committed only after the system can show a feasible route from configuration to production capacity, quality assurance, and deployment.
 
 ```text
 Approved Configuration
@@ -57,116 +55,61 @@ Future Simulation / Routing Learning
 
 ### 3.1 In scope for R0.4.0
 
-R0.4.0 MUST provide:
+R0.4.0 MUST provide production-node and capability registration, deterministic capacity calendars, tentative and committed reservations, license manufacturing orders, work-package decomposition, eligibility filtering, deterministic routing/scoring, work assignment, immutable production-event recording, QA inspection, nonconformance/rework, node-performance aggregation, bottleneck/critical-path calculations, R0.2/R0.3 interfaces, and governance hooks for Genesis, Warden, and River.
 
-- production-node registration;
-- production-node capability registration;
-- deterministic capacity calendars;
-- tentative and committed capacity reservations;
-- license manufacturing orders;
-- work-package decomposition;
-- eligibility filtering;
-- deterministic routing/scoring;
-- work assignment;
-- immutable production-event recording;
-- QA inspection records;
-- nonconformance and rework handling;
-- node-performance aggregation;
-- bottleneck and critical-path calculations;
-- APIs/events required by R0.2 and R0.3;
-- governance hooks for Genesis identity, Warden authorization, and River evidence receipts.
+### 3.2 Explicitly out of scope
 
-### 3.2 Explicitly out of scope for R0.4.0
+Deferred from R0.4.0:
 
-The following are deferred:
-
-- autonomous AI production scheduling;
-- autonomous reassignment without authority approval;
-- contractor procurement marketplace;
-- dynamic bidding between contractors;
-- financial settlement or invoicing;
-- payroll/timekeeping;
-- generalized HR capacity planning;
+- autonomous AI production scheduling or reassignment;
+- contractor procurement marketplace or bidding;
+- financial settlement, invoicing, payroll, or HR planning;
 - generative project decomposition without an approved product BOM;
 - predictive ML scheduling;
-- automatic product changes in response to QA failures;
+- automatic product changes in response to QA outcomes;
 - self-modifying routing weights.
 
-R0.4.0 is deliberately deterministic so routing, capacity, and quality decisions can be explained and audited.
+R0.4.0 remains deterministic so routing, capacity, and quality decisions are explainable and replayable.
 
 ## 4. System Boundary
 
-R0.4 sits between existing logical layers:
-
 ```text
 R0.1 Product Registry
-        │
-        ├── product definition
-        ├── product version
-        ├── component BOM
-        └── QA specification
-        │
+        │ product/version/component BOM/QA specification
+        ▼
 R0.3 Simulation + Configuration Engine
-        │
-        ├── client requirements
-        ├── approved configuration
-        ├── runtime option
-        ├── forecast work
-        └── commercial feasibility
-        │
+        │ requirements/configuration/runtime/forecast work
         ▼
 ┌──────────────────────────────────────┐
 │ R0.4 Production Intelligence Kernel │
-│                                      │
-│ Capacity                             │
-│ Routing                              │
-│ Reservations                         │
-│ Execution Ledger                     │
-│ QA                                   │
-│ Performance                          │
+│ Capacity • Routing • Reservations   │
+│ Execution Ledger • QA • Performance │
 └──────────────────────────────────────┘
-        │
         ▼
 R0.2 License + Deployment Lifecycle
-        │
-        ├── deployed instance
-        ├── acceptance
-        ├── support
-        ├── satisfaction
-        └── license health
+        │ deployment/acceptance/support/license health
 ```
 
-R0.4 MUST not own product definitions, client commercial terms, billing, or long-term client-success records. It references those systems by stable IDs.
+R0.4 MUST not own product definitions, client commercial terms, billing, or long-term client-success records. It references those systems through stable IDs.
 
 ## 5. Core Domain Objects
 
-### 5.1 Production Node
+### 5.1 Production Node and Version
 
-A Production Node is a capacity-bearing entity capable of executing one or more governed production capabilities.
-
-Examples:
-
-- internal engineering team;
-- internal QA cell;
-- contractor;
-- specialist integration partner;
-- deployment team;
-- automated build pipeline;
-- governed AI-agent production capability in a future release.
-
-Canonical fields:
+`production_node_id` is the stable identity of a capacity-bearing producer. Effective attributes are stored in immutable node versions so historical assignments can resolve the exact capability/governance state used at decision time.
 
 ```yaml
 production_node_id: PN-DWS-000001
+production_node_version_id: PNV-DWS-000001-V003
 node_type: internal_team | contractor | qa_cell | automation | deployment_cell
 operator_id: ORG-000001
 name: string
 status: active | conditional | suspended | retired
 
-capability_profile_id: NCP-DWS-000001
+capability_profile_id: NCP-DWS-000001-V004
 calendar_id: CAL-DWS-000001
-cost_profile_id: COST-DWS-000001
-quality_profile_id: QP-DWS-000001
+cost_profile_id: COST-DWS-000001-V002
+quality_profile_id: QP-DWS-000001-V007
 
 governance:
   genesis_principal_id: string
@@ -177,34 +120,31 @@ governance:
 validity:
   effective_from: timestamp
   effective_to: timestamp | null
-  supersedes: production_node_id | null
+  supersedes_version_id: PNV-DWS-000001-V002 | null
 ```
 
-Node records are versioned. Historical execution MUST retain the node version applicable at assignment time.
+`active` nodes may enter automatic routing. `conditional` nodes are excluded from automatic routing and require an explicit governed manual override. `suspended` and `retired` nodes cannot receive new assignments.
 
 ### 5.2 Node Capability
 
-A capability describes work a node is authorized and technically able to perform.
-
 ```yaml
 node_capability_id: NC-DWS-000001
-production_node_id: PN-DWS-000001
+production_node_version_id: PNV-DWS-000001-V003
 capability_code: SUPABASE_SCHEMA | NEON_POSTGRES | LOVABLE_UI | API_INTEGRATION | QA_SECURITY
 skill_level: 1..5
 max_parallel_units: integer
+capacity_unit: engineering_hour | qa_hour | deployment_slot | build_slot
 product_class_allowlist: []
 required_policy_ids: []
 effective_from: timestamp
 effective_to: timestamp | null
 ```
 
-Eligibility is based on explicit capability records, not free-text tags.
+Eligibility is based on explicit capability records, never free-text tags.
 
 ### 5.3 Capacity Calendar
 
-The Capacity Calendar stores deterministic available production capacity by time bucket.
-
-The canonical bucket for R0.4.0 is one day. Weekly and monthly views are derived.
+The canonical scheduling bucket in R0.4.0 is one day; weekly/monthly views are derived.
 
 ```yaml
 capacity_bucket_id: CAP-DWS-20260918-PN000001
@@ -213,29 +153,26 @@ date: 2026-09-18
 nominal_units: decimal
 maintenance_units: decimal
 leave_units: decimal
-reserved_units: decimal
-committed_units: decimal
-available_units: decimal
 capacity_unit: engineering_hour | qa_hour | deployment_slot | build_slot
 ```
 
-`available_units` is derived as:
+Reservation totals and available units are projections derived from reservation rows, not independent authoritative quantities:
 
 ```text
+tentative_reserved = sum(active tentative reservations)
+committed_reserved = sum(active committed reservations)
 available = max(0,
   nominal
   - maintenance
   - leave
-  - active_tentative_reservations
-  - committed_reservations
+  - tentative_reserved
+  - committed_reserved
 )
 ```
 
-Stored derived values MAY be cached but MUST be reproducible from source records.
+Cached projections MAY be stored for performance but MUST be reproducible from source records.
 
 ### 5.4 License Manufacturing Order (LMO)
-
-The LMO is the authoritative production order for one licensed configuration or governed change to a license.
 
 ```yaml
 lmo_id: LMO-DWS-000001
@@ -252,11 +189,9 @@ warden_decision_id: string | null
 river_receipt_id: string | null
 ```
 
-One license MAY have multiple LMOs across its lifetime.
+One license MAY create multiple LMOs over its lifetime.
 
 ### 5.5 Work Package
-
-An LMO is decomposed into individually schedulable Work Packages.
 
 ```yaml
 work_package_id: WP-DWS-000001
@@ -278,7 +213,7 @@ planned_finish_at: timestamp | null
 state: planned | reserved | released | in_progress | blocked | submitted | qa | rework | accepted | cancelled
 ```
 
-Dependencies are represented separately rather than embedded as mutable arrays.
+Dependencies are separate records.
 
 ### 5.6 Work-Package Dependency
 
@@ -291,11 +226,9 @@ minimum_lag_units: decimal
 lag_unit: hour | day
 ```
 
-R0.4.0 supports finish-to-start dependencies only. Additional dependency semantics are deferred.
+Only finish-to-start is supported in R0.4.0.
 
 ### 5.7 Capacity Reservation
-
-Reservations prevent simulation and sales from double-booking the same production capacity.
 
 ```yaml
 reservation_id: RES-DWS-000001
@@ -310,9 +243,10 @@ reserved_units: decimal
 capacity_unit: string
 state: active | converted | released | expired | cancelled
 expires_at: timestamp | null
+authority_ref: string | null
 ```
 
-Tentative reservations MUST have an expiry. Committed reservations MUST reference an accepted commercial or production authority.
+Tentative reservations MUST expire. Committed reservations MUST reference accepted commercial/production authority.
 
 ### 5.8 Work Assignment
 
@@ -320,6 +254,7 @@ Tentative reservations MUST have an expiry. Committed reservations MUST referenc
 assignment_id: ASG-DWS-000001
 work_package_id: WP-DWS-000001
 production_node_id: PN-DWS-000001
+production_node_version_id: PNV-DWS-000001-V003
 reservation_id: RES-DWS-000001
 assigned_at: timestamp
 assigned_by_principal_id: string
@@ -348,30 +283,11 @@ idempotency_key: string
 supersedes_event_id: string | null
 ```
 
-Supported R0.4.0 event types include:
+R0.4.0 registers at least:
 
-- `LMO_CREATED`
-- `CAPACITY_CHECKED`
-- `CAPACITY_RESERVED`
-- `CAPACITY_RESERVATION_EXPIRED`
-- `WORK_PACKAGE_RELEASED`
-- `WORK_ASSIGNED`
-- `WORK_STARTED`
-- `WORK_BLOCKED`
-- `WORK_RESUMED`
-- `BUILD_SUBMITTED`
-- `QA_STARTED`
-- `QA_FAILED`
-- `NONCONFORMANCE_OPENED`
-- `REWORK_REQUESTED`
-- `REWORK_SUBMITTED`
-- `QA_PASSED`
-- `DEPLOYMENT_APPROVED`
-- `WORK_COMPLETED`
-- `LMO_COMPLETED`
-- `ASSIGNMENT_REVOKED`
+`LMO_CREATED`, `CAPACITY_CHECKED`, `CAPACITY_RESERVED`, `CAPACITY_RESERVATION_EXPIRED`, `WORK_PACKAGE_RELEASED`, `WORK_ASSIGNED`, `WORK_STARTED`, `WORK_BLOCKED`, `WORK_RESUMED`, `BUILD_SUBMITTED`, `QA_STARTED`, `QA_FAILED`, `NONCONFORMANCE_OPENED`, `REWORK_REQUESTED`, `REWORK_SUBMITTED`, `QA_PASSED`, `DEPLOYMENT_APPROVED`, `WORK_COMPLETED`, `LMO_COMPLETED`, and `ASSIGNMENT_REVOKED`.
 
-Unknown event types MUST be rejected unless registered in a versioned event-type registry.
+Unknown event types are rejected unless present in a versioned event-type registry.
 
 ### 5.10 QA Inspection
 
@@ -410,8 +326,6 @@ closure_evidence_receipt_id: string | null
 
 ### 5.12 Node Performance Snapshot
 
-Performance is derived from historical production data and stored as versioned snapshots for explainable routing.
-
 ```yaml
 node_performance_snapshot_id: NPS-DWS-000001
 production_node_id: PN-DWS-000001
@@ -431,15 +345,16 @@ calculated_at: timestamp
 algorithm_version: R0.4.0
 ```
 
+Historical routing stores the snapshot/version used at decision time.
+
 ## 6. Work-Package Decomposition
 
-R0.4 does not generate arbitrary project plans. It expands an approved Product BOM / Configuration using versioned manufacturing recipes.
+R0.4 expands an approved Product BOM/Configuration using versioned manufacturing recipes; it does not generate arbitrary project plans.
 
-Example recipe:
+Example:
 
 ```text
 DWS-ECOM-ORDER-001@1.2
-
 1. Provision registry runtime
 2. Install schema
 3. Configure UI
@@ -451,23 +366,13 @@ DWS-ECOM-ORDER-001@1.2
 9. Deploy
 ```
 
-A manufacturing recipe MUST specify:
+A recipe MUST specify work-package templates, effort model, dependency order, eligible capability codes, QA gates, security classifications, and routing policy.
 
-- work-package templates;
-- effort model;
-- dependency order;
-- eligible capability codes;
-- QA gates;
-- security classifications;
-- allowed routing policies.
-
-Decomposition inputs are immutable IDs for the selected product versions and approved configuration. A changed configuration creates a new decomposition/version; it does not silently mutate released work packages.
+Changed configuration creates a new decomposition/version and never silently mutates released work packages.
 
 ## 7. Eligibility Engine
 
-Before scoring candidates, R0.4 performs hard eligibility filtering.
-
-A node is eligible only when all mandatory predicates pass:
+Automatic routing requires all predicates to pass:
 
 ```text
 node.status == active
@@ -481,13 +386,9 @@ AND node is not explicitly blocked
 AND requested capacity unit is supported
 ```
 
-An ineligible node MUST never receive a routing score.
-
-Eligibility results are persisted as part of the routing decision evidence.
+Conditional nodes are considered only through a recorded manual override authorized by Warden. Ineligible nodes never receive automatic routing scores.
 
 ## 8. Routing Engine
-
-### 8.1 R0.4.0 routing score
 
 For eligible nodes:
 
@@ -502,63 +403,42 @@ Route Score =
 + 0.05 × Client-Experience History
 ```
 
-All component scores are normalized to 0–100.
+All components are normalized 0–100. Routing weights are versioned configuration.
 
-Weights are versioned configuration, not hard-coded constants.
+`Client-Experience History` is an imported read-only score from the R0.2 client/license outcome layer. If no statistically usable history exists, the routing weight is redistributed proportionally across the other six components for that decision; missing history is never interpreted as zero quality.
 
-### 8.2 Deterministic tie-breaking
-
-If two candidates have the same score to two decimal places, apply in order:
+Tie-breaking, after equality to two decimals:
 
 1. higher governance/security fit;
 2. higher first-pass yield;
 3. earlier feasible completion;
 4. lower forecast cost;
-5. lexical order of `production_node_id`.
+5. lexical `production_node_id`.
 
-This guarantees deterministic replay.
+Every routing decision stores algorithm version, weight profile, eligible/ineligible candidates and reasons, component scores, selected node, effective node/performance versions, authority/evidence references, and decision timestamp.
 
-### 8.3 Routing decision record
-
-Every decision stores:
-
-```yaml
-routing_decision_id: ROUTE-DWS-000001
-work_package_id: WP-DWS-000001
-algorithm_version: R0.4.0
-weight_profile_id: RWP-DWS-000001
-eligible_candidates: []
-ineligible_candidates_with_reasons: []
-selected_node_id: PN-DWS-000001
-component_scores: {}
-final_score: decimal
-decided_at: timestamp
-warden_decision_id: string | null
-river_receipt_id: string | null
-```
-
-No assignment is valid without a routing-decision record or a governed manual override.
+No assignment is valid without a routing-decision record or governed manual override.
 
 ## 9. Capacity Reservation Protocol
 
-### 9.1 Tentative reservation
+### 9.1 Tentative holds
 
-R0.3 may request capacity for a simulation or quote.
+R0.3 may request a capacity hold for a simulation/quote. R0.4 decomposes forecast work, evaluates eligible nodes, finds feasible windows, creates expiring tentative reservations, and returns feasibility plus schedule data.
 
-The kernel:
+R0.4's `schedule_confidence` in R0.4.0 is **not a probabilistic delivery forecast**. It is a deterministic data-completeness score indicating how much of the proposed schedule is backed by explicit node capacity, effort estimates, dependencies, and current performance history.
 
-1. decomposes forecast work;
-2. evaluates eligible nodes;
-3. finds feasible windows;
-4. creates tentative reservations;
-5. assigns `expires_at`;
-6. returns earliest feasible completion and confidence metrics.
+```text
+Schedule Confidence =
+25% capacity coverage
++ 25% effort-model coverage
++ 20% dependency completeness
++ 15% node-performance-history coverage
++ 15% QA-duration-model coverage
+```
 
-Tentative reservations reduce available capacity while active.
+Each component is 0–100. R0.3 may combine this with its own commercial/simulation confidence, but R0.4 MUST return the component breakdown.
 
-### 9.2 Conversion to committed reservation
-
-On approved commercial acceptance / license authority:
+### 9.2 Conversion to committed capacity
 
 ```text
 Tentative Reservation
@@ -570,17 +450,15 @@ Committed Reservation
 LMO release
 ```
 
-Conversion MUST be atomic at the reservation layer. If any required reservation cannot be converted, the LMO remains unreleased and a capacity conflict is raised.
+Conversion is atomic at the reservation-group level. If any required reservation cannot convert, none in the group convert and the LMO remains unreleased.
 
 ### 9.3 Expiry
 
-Expired tentative reservations are released automatically and generate `CAPACITY_RESERVATION_EXPIRED` events.
+Expired tentative reservations release capacity and append `CAPACITY_RESERVATION_EXPIRED`.
 
 ## 10. Scheduling and Bottleneck Intelligence
 
 R0.4.0 uses deterministic forward scheduling over the dependency DAG.
-
-For each work package:
 
 ```text
 earliest_start = max(
@@ -589,175 +467,95 @@ earliest_start = max(
   first capacity-feasible time on assigned node
 )
 
-planned_finish = earliest_start + effort adjusted for assigned capacity calendar
+planned_finish = earliest_start + effort adjusted by assigned capacity calendar
 ```
 
-The kernel derives:
+Derived outputs:
 
 - critical path;
-- total planned lead time;
-- queue time;
-- processing time;
-- QA time;
-- rework time;
-- blocked time;
-- node utilization;
-- work in progress;
+- planned lead time;
+- queue, processing, QA, rework, and blocked time;
+- node utilization and WIP;
 - schedule slack;
 - earliest feasible completion;
 - bottleneck node/capability.
 
-A bottleneck is reported when a capability/node group has the highest constrained utilization on the critical or near-critical path and materially affects completion.
-
-R0.4.0 MUST explain the bottleneck with supporting work packages and reservation intervals.
+A bottleneck report identifies the constrained capability/node group, affected work packages, capacity intervals, and effect on completion.
 
 ## 11. State Machines
 
-### 11.1 LMO state
+### 11.1 LMO
 
 ```text
-PLANNED
-  ↓
-CAPACITY_CHECKED
-  ↓
-RESERVED
-  ↓
-RELEASED
-  ↓
-IN_PROGRESS
-  ↓
-QA_HOLD (optional / repeatable)
-  ↓
-COMPLETED
+PLANNED → CAPACITY_CHECKED → RESERVED → RELEASED → IN_PROGRESS
+                                               ↓
+                                           QA_HOLD
+                                               ↓
+                                           COMPLETED
 ```
 
-Terminal alternate state: `CANCELLED`.
+`CANCELLED` is terminal. Cancellation records an event and releases remaining reservations.
 
-Cancellation does not delete history; it releases remaining reservations and records an event.
-
-### 11.2 Work package state
+### 11.2 Work Package
 
 ```text
-PLANNED
-  ↓
-RESERVED
-  ↓
-RELEASED
-  ↓
-IN_PROGRESS
-  ├── BLOCKED ──► IN_PROGRESS
-  ↓
-SUBMITTED
-  ↓
-QA
-  ├── REWORK ──► IN_PROGRESS
-  ↓
-ACCEPTED
+PLANNED → RESERVED → RELEASED → IN_PROGRESS
+                                 ↕ BLOCKED
+                                  ↓
+                              SUBMITTED
+                                  ↓
+                                  QA
+                         REWORK ↗  ↓
+                               ACCEPTED
 ```
 
-Terminal alternate state: `CANCELLED`.
-
-Illegal transitions return a conflict error and do not modify state.
+`CANCELLED` is terminal. Illegal transitions return a conflict and do not alter state.
 
 ## 12. Quality Model
 
-Quality decisions attach to product specification, production execution, and deployed-license outcome separately.
-
-R0.4 owns production quality, not master-product quality or long-term client experience.
-
-Primary R0.4 metrics:
+R0.4 owns production quality, not master-product quality or long-term client satisfaction.
 
 ```text
-First Pass Yield = accepted on first inspection / first inspections
-
-On-Time Completion = completed by committed finish / completed work
-
-Cost Adherence = min(planned cost / actual cost, 1) where actual > planned,
-                 otherwise 1
-
-Defect Escape Rate = defects discovered after QA acceptance / accepted units
-
-Rework Rate = work packages requiring rework / submitted work packages
+First Pass Yield = first-inspection acceptances / first inspections
+On-Time Completion = work completed by committed finish / completed work
+Defect Escape Rate = post-QA defects / accepted work packages
+Rework Rate = packages requiring rework / submitted packages
 ```
 
-Contractors and internal teams are scored using the same production evidence. Different commercial consequences may apply, but quality mathematics is shared.
+Internal and contracted production use the same evidence and quality mathematics.
 
 ## 13. Performance Feedback
 
-After an LMO reaches completion and sufficient post-deployment evidence exists, node-performance snapshots are recomputed.
+After LMO completion and required post-deployment evidence becomes available, a new node-performance snapshot is calculated.
 
-Historical routing decisions are never recalculated retroactively. They retain the performance snapshot and algorithm version used at decision time.
-
-Future routing uses the latest effective performance snapshot.
-
-This allows measured quality and delivery performance to influence future assignments without creating an opaque self-learning scheduler.
+Historical routing decisions are never recalculated. Future decisions use the latest effective snapshot. This creates evidence-driven routing without an opaque self-learning scheduler.
 
 ## 14. Governance Integration
 
-### 14.1 Genesis
+### Genesis
 
-Genesis provides stable identity for:
+Provides stable identity for production nodes, operators, actors/principals, client/licensed-estate references, and product/version identities. R0.4 stores Genesis references but does not become the identity authority.
 
-- production nodes;
-- operators;
-- actors/principals;
-- client/licensed-estate references;
-- approved product/version identities where applicable.
+### Warden
 
-R0.4 stores Genesis IDs but does not become the canonical identity registry.
+Authorizes admission/suspension of nodes, restricted product assignments, manual routing overrides, high-risk reservation conversion, accepted QA exceptions, and deployment approval where required. R0.4 records Warden decision IDs and does not duplicate policy logic.
 
-### 14.2 Warden
+### River
 
-Warden is the authority gate for operations including:
-
-- admitting or suspending production nodes;
-- permitting a node to work on security-restricted product classes;
-- manual routing overrides;
-- conversion of high-risk capacity reservations;
-- acceptance with exception;
-- deployment approval where required.
-
-R0.4 records Warden decision IDs; it does not reproduce Warden policy logic internally.
-
-### 14.3 River
-
-River stores evidence receipts for materially governed events, including:
-
-- routing decisions;
-- capacity commitments;
-- work submission;
-- QA outcomes;
-- accepted exceptions;
-- deployment approvals;
-- final LMO completion.
-
-The local event ledger stores references and execution projections. River remains the evidence authority.
+Stores evidence receipts for material routing decisions, capacity commitments, submissions, QA outcomes, exceptions, deployment approvals, and final LMO completion. R0.4 maintains operational projections and evidence references; River remains the evidence authority.
 
 ## 15. External Interfaces
 
-### 15.1 R0.3 → R0.4
-
-Required operations:
+### R0.3 → R0.4
 
 - `simulate_capacity(configuration_id, requested_window)`
 - `hold_capacity(simulation_id, ttl)`
 - `release_capacity_hold(reservation_group_id)`
 - `quote_delivery_projection(configuration_id)`
 
-Returned data includes:
+Returns feasibility, candidate route, reservations, earliest start, predicted deterministic finish, bottlenecks, forecast production cost, schedule-confidence breakdown.
 
-- feasibility;
-- candidate route;
-- tentative reservations;
-- earliest start;
-- predicted completion;
-- bottlenecks;
-- forecast production cost;
-- confidence inputs.
-
-### 15.2 R0.2 → R0.4
-
-Required operations:
+### R0.2 → R0.4
 
 - `create_lmo(license_id, configuration_id, production_reason)`
 - `commit_capacity(lmo_id, authority_context)`
@@ -765,14 +563,14 @@ Required operations:
 - `cancel_lmo(lmo_id, reason)`
 - `get_lmo_status(lmo_id)`
 
-### 15.3 Production consoles → R0.4
+### Production consoles → R0.4
 
 - `start_work(assignment_id)`
 - `block_work(assignment_id, reason)`
 - `resume_work(assignment_id)`
 - `submit_work(assignment_id, artifact_refs, evidence_refs)`
 
-### 15.4 QA → R0.4
+### QA → R0.4
 
 - `start_inspection(work_package_id, qa_specification_id)`
 - `record_inspection_result(qa_inspection_id, result)`
@@ -780,17 +578,16 @@ Required operations:
 - `request_rework(...)`
 - `close_nonconformance(...)`
 
-All mutating calls require idempotency keys.
+All mutating operations require idempotency keys.
 
 ## 16. Persistence Architecture
 
-R0.4.0 should use a transactional PostgreSQL system of record. Supabase or Neon may host it, but provider choice is deployment configuration rather than domain architecture.
-
-Recommended logical schemas:
+R0.4.0 uses transactional PostgreSQL as system of record. Supabase or Neon may host it; provider choice is deployment configuration rather than domain architecture.
 
 ```text
 production_core
   production_nodes
+  production_node_versions
   node_capabilities
   manufacturing_recipes
   manufacturing_recipe_steps
@@ -821,195 +618,104 @@ ledger
   idempotency_keys
 ```
 
-Airtable is an operational/control surface, not the canonical transaction database for capacity reservation or event integrity.
-
-Lovable may provide the operator UI, but no core production rule may exist only in client-side UI code.
+Airtable may serve as an operational/control surface, but it is not the canonical transaction database for capacity reservations or event integrity. Lovable may provide UI, but no core production rule may exist only in client-side code.
 
 ## 17. Concurrency and Integrity
 
-Capacity reservation is the highest-risk concurrency boundary.
+Capacity reservation is the primary concurrency boundary.
 
-R0.4 MUST prevent overbooking under concurrent quote or LMO requests.
+Required behavior:
 
-Required behaviors:
-
-- capacity checks and reservation writes execute transactionally;
-- overlapping writes to the same node/time bucket are serialized or use optimistic concurrency with retry;
-- committed capacity can never exceed allocatable capacity unless a governed override is explicitly represented;
-- tentative holds cannot overwrite committed reservations;
-- idempotent retries return the prior result rather than duplicate reservations/events;
-- assignment cannot reference expired or released committed capacity.
+- capacity check + reservation writes are transactional;
+- concurrent writes to the same node/time bucket are serialized or use optimistic concurrency with bounded retry;
+- committed capacity never exceeds allocatable capacity without an explicit governed override;
+- tentative holds cannot displace committed reservations;
+- idempotent retries return the prior material result;
+- assignment cannot reference expired/released committed capacity;
+- conversion of a reservation group is all-or-nothing.
 
 ## 18. Error Model
 
-Errors are structured and machine-readable.
-
 Minimum codes:
 
-```text
-DWS_CAPACITY_UNAVAILABLE
-DWS_CAPACITY_CONFLICT
-DWS_RESERVATION_EXPIRED
-DWS_INELIGIBLE_NODE
-DWS_NO_ELIGIBLE_ROUTE
-DWS_ILLEGAL_STATE_TRANSITION
-DWS_DEPENDENCY_INCOMPLETE
-DWS_QA_REQUIRED
-DWS_QA_FAILED
-DWS_NONCONFORMANCE_OPEN
-DWS_GOVERNANCE_DENIED
-DWS_IDEMPOTENCY_CONFLICT
-DWS_CONFIGURATION_VERSION_MISMATCH
-```
+`DWS_CAPACITY_UNAVAILABLE`, `DWS_CAPACITY_CONFLICT`, `DWS_RESERVATION_EXPIRED`, `DWS_INELIGIBLE_NODE`, `DWS_NO_ELIGIBLE_ROUTE`, `DWS_ILLEGAL_STATE_TRANSITION`, `DWS_DEPENDENCY_INCOMPLETE`, `DWS_QA_REQUIRED`, `DWS_QA_FAILED`, `DWS_NONCONFORMANCE_OPEN`, `DWS_GOVERNANCE_DENIED`, `DWS_IDEMPOTENCY_CONFLICT`, `DWS_CONFIGURATION_VERSION_MISMATCH`.
 
-Each error contains:
-
-- `code`;
-- `message`;
-- `aggregate_id` when relevant;
-- `retryable` boolean;
-- `evidence_context` where applicable.
+Each error contains `code`, `message`, relevant aggregate ID, `retryable`, and evidence context where applicable.
 
 ## 19. Security
 
-R0.4 MUST enforce tenant/estate isolation for all license-linked production data.
-
-Minimum requirements:
-
-- no client-side service-role or privileged database secrets;
-- least-privilege service identities;
-- explicit authorization on every mutating operation;
-- row-level or equivalent tenant isolation for exposed data paths;
-- auditability of manual overrides;
-- append-only production-event semantics;
-- signed/traceable evidence references where available;
-- secrets referenced by secret IDs, never copied into work-package payloads;
-- contractors receive only the minimum scoped data required for assigned work.
+R0.4 MUST enforce tenant/estate isolation for all license-linked production data, least-privilege service identities, explicit authorization on mutation, row-level/equivalent isolation for exposed paths, auditable manual overrides, append-only event semantics, traceable evidence references, secret references instead of secret values in work payloads, and minimum-necessary contractor data access.
 
 ## 20. Observability
 
-Minimum service metrics:
+Minimum metrics:
 
 - capacity utilization by node/capability;
-- tentative reservation volume and expiry rate;
-- committed reservation conflict rate;
-- routing success/failure rate;
-- average routing latency;
-- work-in-progress by state;
+- hold volume/expiry and commitment conflicts;
+- routing success/failure and latency;
+- WIP by state;
 - critical-path variance;
-- on-time completion rate;
-- first-pass yield;
-- rework rate;
-- nonconformance rate;
+- on-time completion;
+- first-pass yield, rework and NCR rates;
 - event-ledger write failures;
 - idempotency conflicts.
 
-Every request should carry a correlation ID linking simulation, quote, license, LMO, work package, assignment, QA, and deployment where those IDs exist.
+Correlation IDs link simulation, quote, license, LMO, work package, assignment, QA, and deployment where available.
 
 ## 21. Operator Surfaces
 
-R0.4 requires three primary operator views.
+### Factory Control
 
-### 21.1 Factory Control
+Active LMOs, WIP, blocked work, critical-path risk, utilization, capacity conflicts, QA holds.
 
-Shows:
+### Production Node / Contractor Scorecard
 
-- active LMOs;
-- WIP;
-- blocked work;
-- critical-path risk;
-- utilization;
-- upcoming capacity conflicts;
-- QA holds.
+Assigned workload, availability, delivery reliability, first-pass yield, defect/rework history, classification, authorization status.
 
-### 21.2 Production Node / Contractor Scorecard
-
-Shows:
-
-- assigned workload;
-- available capacity;
-- delivery reliability;
-- first-pass yield;
-- defect and rework history;
-- quality classification;
-- current authorization status.
-
-### 21.3 LMO Trace
-
-Shows the complete evidence chain:
+### LMO Trace
 
 ```text
-License
-→ Configuration
-→ LMO
-→ Work Packages
-→ Routing Decisions
-→ Reservations
-→ Assignments
-→ Production Events
-→ QA
-→ Nonconformances / Rework
-→ Completion
-→ Deployment reference
+License → Configuration → LMO → Work Packages → Routing Decisions
+→ Reservations → Assignments → Production Events → QA/NCR/Rework
+→ Completion → Deployment Reference
 ```
 
-The UI is a projection over canonical records. It must never become the source of truth.
+All UIs are projections over canonical records.
 
 ## 22. Testing Strategy
 
-### 22.1 Unit tests
+### Unit tests
 
-Cover:
+Eligibility predicates, normalization, routing weights, tie-breaking, capacity arithmetic, state transitions, critical-path calculation, metric calculation, schedule-confidence calculation.
 
-- eligibility predicates;
-- score normalization;
-- routing weights;
-- deterministic tie-breaking;
-- capacity arithmetic;
-- state transitions;
-- critical-path calculation;
-- metric calculations.
+### Property/invariant tests
 
-### 22.2 Property/invariant tests
+- committed capacity cannot exceed allocatable capacity without an explicit override;
+- work cannot be accepted without required QA pass/authorized exception;
+- completed work cannot retain blocking open NCRs;
+- assignments reference an eligible route or governed override;
+- one idempotency key cannot create two material effects;
+- event history is not deleted by normal flows;
+- reservation-group conversion is atomic.
 
-Required invariants:
+### Integration tests
 
-- committed capacity never exceeds allocatable capacity without an explicit override record;
-- work cannot be accepted without required QA pass/exception authority;
-- completed work cannot reference an active nonconformance of blocking severity;
-- assignments always reference an eligible node decision or governed override;
-- the same idempotency key cannot create two material effects;
-- historical events are never deleted through normal application flows.
+Concurrent holds, hold conversion, expiry/release, dependency release, QA fail→NCR→rework→pass, reassignment, Warden denial, River receipt retry behavior.
 
-### 22.3 Integration tests
-
-Cover:
-
-- concurrent tentative holds against the same capacity bucket;
-- tentative-to-committed conversion;
-- hold expiry and release;
-- LMO release with multiple dependent work packages;
-- QA fail → NCR → rework → QA pass;
-- assignment revocation/reassignment;
-- Warden denial;
-- River receipt recording failure and retry policy.
-
-### 22.4 End-to-end qualification scenario
-
-R0.4.0 is not production-qualified until a reference license can execute this trace:
+### End-to-end qualification
 
 ```text
 R0.3 configuration
 → capacity simulation
 → tentative hold
-→ accepted quote/license authority
+→ accepted license authority
 → committed reservation
 → LMO
-→ work package decomposition
+→ decomposition
 → routed assignment
 → execution events
-→ one intentional QA failure
-→ nonconformance
+→ intentional QA failure
+→ NCR
 → rework
 → QA pass
 → LMO completion
@@ -1017,85 +723,53 @@ R0.3 configuration
 → node-performance snapshot update
 ```
 
-The test must prove replayability of routing inputs and capacity history.
+Qualification MUST prove replayability of routing inputs and capacity history.
 
 ## 23. Rollout
 
-### Phase A — Read-only planning
+**Phase A — Read-only planning:** register nodes/capabilities/capacity and run shadow routing without capacity commitment.
 
-- register production nodes;
-- import/manual-enter capability and capacity profiles;
-- run shadow routing;
-- compare proposed routing with human decisions;
-- no automatic capacity commitment.
+**Phase B — Governed reservations:** enable R0.3 tentative holds and authorized conversion; operate LMO/event lifecycle.
 
-### Phase B — Governed reservations
+**Phase C — Production control:** execute assignments, make QA/NCR authoritative, and feed performance into future routing.
 
-- enable tentative holds from R0.3;
-- enable manual/authorized conversion to committed capacity;
-- operate LMO state machine;
-- maintain evidence ledger.
+**Phase D — Optimization readiness:** only after sufficient evidence consider predictive scheduling, advanced optimization, or autonomous agent participation.
 
-### Phase C — Production control
+## 24. Acceptance Criteria
 
-- production nodes execute through assignments;
-- QA/NCR loop becomes authoritative;
-- node performance affects future routing scores.
+R0.4.0 is accepted when:
 
-### Phase D — Optimization readiness
-
-Only after sufficient evidence exists should later releases consider optimization, predictive scheduling, or autonomous agent participation.
-
-## 24. Acceptance Criteria for R0.4.0
-
-R0.4.0 is accepted when all of the following are demonstrated:
-
-1. At least one internal and one contracted Production Node can be registered with capabilities and capacity.
-2. One approved configuration can deterministically generate an LMO and work-package DAG.
-3. Ineligible nodes are excluded with recorded reasons.
-4. Eligible nodes are scored reproducibly using a versioned weight profile.
-5. Tentative capacity can be held, expired/released, and converted to committed capacity without overbooking.
-6. A work package can be assigned, started, blocked, resumed, submitted, inspected, failed, reworked, and accepted.
-7. The production-event ledger reconstructs the effective current state.
-8. A QA failure creates a nonconformance and prevents completion until resolved or explicitly accepted by authority.
-9. A completed LMO updates a versioned node-performance snapshot.
-10. The complete trace from simulation/configuration to deployment handoff is inspectable by stable IDs and evidence references.
-11. Concurrent reservation tests prove no capacity overbooking under supported transaction isolation.
-12. All material mutating operations are idempotent and auditable.
+1. At least one internal and one contracted Production Node are registered with capabilities/capacity.
+2. One approved configuration deterministically generates an LMO and work-package DAG.
+3. Ineligible nodes are excluded with persisted reasons; conditional nodes require governed override.
+4. Eligible nodes are scored reproducibly with versioned weights and missing-history rules.
+5. Tentative capacity can be held, expired/released, and atomically converted without overbooking.
+6. A work package can traverse start, block/resume, submit, QA fail, NCR, rework, and accept.
+7. The event ledger reconstructs effective state.
+8. Blocking QA/NCR conditions prevent completion until resolved or explicitly accepted by authority.
+9. Completed LMOs update versioned node-performance snapshots.
+10. The full simulation→deployment trace is inspectable through stable IDs/evidence references.
+11. Concurrency tests prove no overbooking under supported transaction isolation.
+12. All material mutations are idempotent and auditable.
+13. Schedule-confidence output is reproducible from its five declared coverage components.
 
 ## 25. Future Extension Points
 
-The design intentionally leaves stable extension seams for:
+Stable extension seams are reserved for predictive duration models, Monte Carlo completion confidence, multi-objective routing, autonomous agent production nodes, contractor bidding/procurement, SILK settlement, cross-estate production markets, carbon/resource routing dimensions, dynamic recipes, and manufacturing digital twins.
 
-- predictive duration models;
-- Monte Carlo completion confidence;
-- multi-objective routing optimization;
-- autonomous agent production nodes;
-- contractor bidding/procurement;
-- SILK-linked settlement;
-- cross-estate production markets;
-- carbon/resource intensity as routing dimensions;
-- dynamic product-manufacturing recipes;
-- manufacturing digital twins.
-
-These extensions must remain additive. R0.4.0 event history, IDs, authority records, and evidence references remain valid when later versions are introduced.
+Extensions remain additive: R0.4.0 IDs, event history, authority records, and evidence references stay valid under future versions.
 
 ## 26. Implementation Boundary
 
-The first implementation plan should create the smallest production slice that proves the kernel:
+The first implementation plan proves the smallest kernel:
 
 ```text
-Production Nodes
-+ Capabilities
-+ Daily Capacity Buckets
-+ Reservations
-+ LMO
-+ Work Packages / Dependencies
-+ Deterministic Routing
-+ Assignments
-+ Append-only Events
-+ QA / NCR
+Production Nodes + Node Versions + Capabilities
++ Daily Capacity Buckets + Reservations
++ LMO + Work Packages/Dependencies
++ Deterministic Routing + Assignments
++ Append-only Events + QA/NCR
 + Performance Snapshot
 ```
 
-No additional marketplace, billing, autonomous AI, or advanced optimization feature should enter the first implementation plan unless this specification is explicitly superseded by a separately approved design change.
+No marketplace, billing, autonomous AI, or advanced optimization enters the first implementation plan unless this specification is explicitly superseded by a separately approved design change.
