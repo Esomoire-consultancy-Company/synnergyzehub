@@ -2,61 +2,57 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the smallest auditable R0.4 production kernel that can register production nodes, decompose an approved configuration into work packages, route work deterministically, reserve capacity without overbooking, record execution/QA evidence, and update node performance.
+**Goal:** Build the smallest auditable R0.4 production kernel that registers production nodes, decomposes approved configurations into work packages, routes work deterministically, reserves capacity without overbooking, records execution/QA evidence, and updates node performance.
 
-**Architecture:** Add an isolated server-side TypeScript domain under `lib/dws-production/` with PostgreSQL as the canonical transaction store and thin Next.js route adapters under `app/api/dws-production/`. The existing Genesis Seed MCP route remains unchanged. Capacity, routing, QA, state transitions, and event replay live in pure domain/services; database writes are transactional and all mutating HTTP calls are internal-token protected and idempotent.
+**Architecture:** Add an isolated server-side TypeScript domain under `lib/dws-production/`, backed by PostgreSQL 16 and exposed through thin Next.js route handlers. Domain rules stay independent of HTTP and database adapters. The existing Genesis Seed MCP surface remains unchanged. Production-event history is append-only; capacity reservation uses transactional row locking; all tenant-bound mutations are idempotent and execute in a tenant-scoped transaction.
 
-**Tech Stack:** Next.js 15.5.18, React 18.3.1, TypeScript 5.6.2, Zod 3.25+, PostgreSQL 16 for local/CI qualification, `postgres` for database access, Vitest for unit/integration tests, Node.js 22 in CI.
+**Tech Stack:** Next.js 15.5.18, React 18.3.1, TypeScript 5.6.2, Zod 3.25+, PostgreSQL 16, `postgres`, Vitest, `tsx`, Node.js 22.
 
 **Spec:** `docs/superpowers/specs/2026-09-12-data-weaver-r0.4-production-intelligence-design.md`
 
 ## Global Constraints
 
-- R0.4.0 remains deterministic; no predictive ML scheduling, autonomous reassignment, contractor marketplace, billing, or self-modifying routing weights.
-- PostgreSQL is the authoritative transaction store; Airtable/Lovable are projections or operator surfaces only.
-- `production_node_id` is stable identity; historical assignments bind an immutable `production_node_version_id`.
-- Only `active` nodes enter automatic routing. `conditional` nodes require a recorded governed override. `suspended` and `retired` nodes receive no new assignments.
-- Routing weights are versioned and default to 25/20/15/15/10/10/5 for capability/capacity/quality/delivery/cost/governance/client-history.
-- Missing client-history redistributes its 5% proportionally across the other six routing components; missing history is never treated as zero quality.
-- Tentative reservations expire. Reservation-group conversion to committed capacity is atomic.
-- All material mutation APIs require an idempotency key.
-- Production events are append-only. Current state is a projection and must be reconstructable from history.
-- Required QA and open blocking nonconformances prevent acceptance/completion unless an explicit authorized exception exists.
-- Tenant/estate isolation is mandatory on all license-linked records.
-- Genesis/Warden/River remain external authorities; R0.4 stores stable references and must not duplicate their policy/evidence authority.
-- Existing `/api/mcp` and `/api/mcp-selftest` behavior must remain unchanged.
+- R0.4.0 is deterministic: no predictive ML scheduling, autonomous reassignment, contractor marketplace, billing, or self-modifying routing weights.
+- PostgreSQL is the canonical transaction store. Airtable and Lovable may consume projections later; they are not authoritative in this plan.
+- `production_node_id` is stable identity. Historical decisions and assignments bind an immutable `production_node_version_id`.
+- Only `active` nodes enter automatic routing. `conditional` nodes require a Warden-authorized override. `suspended` and `retired` nodes receive no new work.
+- Base routing weights are capability 0.25, capacity 0.20, quality 0.15, delivery 0.15, cost 0.10, governance 0.10, client history 0.05.
+- If client-history is absent, its 0.05 weight is redistributed proportionally across the other six factors.
+- Tentative capacity reservations expire. Reservation-group conversion to committed capacity is all-or-nothing.
+- Every material mutation requires an idempotency key.
+- Production events are append-only. Effective state must be replayable from the event stream.
+- QA pass/authorized exception and closure/authorized acceptance of blocking NCRs are prerequisites for acceptance/completion.
+- Every license-linked row carries `tenant_id`; services must execute tenant-bound queries through a tenant-scoped transaction.
+- Genesis, Warden, and River remain external authorities. R0.4 persists their stable references but does not implement their policy/evidence engines.
+- Existing `/api/mcp` and `/api/mcp-selftest` behavior is unchanged.
 
----
-
-## File Structure
-
-Create these focused modules rather than one large service:
+## Target File Map
 
 ```text
 lib/dws-production/
   domain/
-    ids.ts                 canonical DWS IDs
-    schemas.ts             Zod command/domain schemas
-    errors.ts              typed DWS error model
-    state-machines.ts      LMO/work-package transitions
-    scoring.ts             pure eligibility/routing math
-    scheduling.ts          DAG/critical-path/schedule-confidence math
-    metrics.ts             quality/performance formulas
+    ids.ts
+    schemas.ts
+    errors.ts
+    state-machines.ts
+    scoring.ts
+    scheduling.ts
+    metrics.ts
   db/
-    client.ts              PostgreSQL connection + transaction helper
-    migrate.ts             migration runner
-    repositories.ts        persistence queries grouped by aggregate
+    client.ts
+    migrate.ts
+    repositories.ts
   services/
-    nodes.ts               node/version/capability registration
-    decomposition.ts       recipe → LMO/work-package DAG
-    capacity.ts            simulate/hold/commit/release
-    routing.ts             eligibility + scoring + persisted decisions
-    execution.ts           assignments + append-only events
-    quality.ts             inspection/NCR/rework/acceptance gates
-    performance.ts         performance snapshot calculation
+    nodes.ts
+    decomposition.ts
+    capacity.ts
+    routing.ts
+    execution.ts
+    quality.ts
+    performance.ts
   http/
-    auth.ts                internal API authentication/context
-    response.ts            domain-error → HTTP response mapping
+    auth.ts
+    response.ts
 
 db/dws-production/
   001_r04_core.sql
@@ -75,22 +71,28 @@ app/api/dws-production/
   health/route.ts
 
 tests/dws-production/
+  db-smoke.integration.test.ts
+  schema.integration.test.ts
   domain.test.ts
-  routing.test.ts
+  nodes.integration.test.ts
   scheduling.test.ts
-  capacity.integration.test.ts
   lmo.integration.test.ts
+  routing.test.ts
+  routing.integration.test.ts
+  capacity.integration.test.ts
   quality.integration.test.ts
+  performance.test.ts
+  http.test.ts
   qualification.integration.test.ts
 
 infra/dws-production/docker-compose.yml
-scripts/dws-migrate.mjs
 .github/workflows/dws-production.yml
+docs/dws-production/R0.4-QUALIFICATION.md
 ```
 
 ---
 
-### Task 1: Establish TypeScript test and PostgreSQL development harness
+### Task 1: Establish the TypeScript, test, and PostgreSQL harness
 
 **Files:**
 - Modify: `package.json`
@@ -101,32 +103,31 @@ scripts/dws-migrate.mjs
 - Create: `tests/dws-production/db-smoke.integration.test.ts`
 
 **Interfaces:**
-- Produces: `getDb(): postgres.Sql`, `withTransaction<T>(fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T>`
-- Environment: `DWS_DATABASE_URL`, `DWS_TEST_DATABASE_URL`, `DWS_INTERNAL_API_TOKEN`
+- `getDb(): Sql`
+- `withTransaction<T>(fn): Promise<T>`
+- `withTenantTransaction<T>(tenantId, fn): Promise<T>`
 
-- [ ] **Step 1: Add the test/database dependencies and scripts**
+- [ ] **Step 1: Add dependencies and exact scripts**
 
-Update `package.json` scripts to include:
+Run:
+
+```bash
+npm install postgres
+npm install -D vitest tsx
+```
+
+Set `package.json` scripts to include:
 
 ```json
 {
   "test": "vitest run",
-  "test:unit": "vitest run tests/dws-production/domain.test.ts tests/dws-production/routing.test.ts tests/dws-production/scheduling.test.ts",
+  "test:unit": "vitest run tests/dws-production/domain.test.ts tests/dws-production/routing.test.ts tests/dws-production/scheduling.test.ts tests/dws-production/performance.test.ts",
   "test:integration": "vitest run tests/dws-production/*.integration.test.ts",
-  "dws:migrate": "node scripts/dws-migrate.mjs"
+  "dws:migrate": "tsx lib/dws-production/db/migrate.ts"
 }
 ```
 
-Install with:
-
-```bash
-npm install postgres
-npm install -D vitest
-```
-
-Commit the generated `package-lock.json` so dependency resolution is pinned.
-
-- [ ] **Step 2: Add compiler and test configuration**
+- [ ] **Step 2: Add exact compiler/test config**
 
 Create `tsconfig.json`:
 
@@ -135,10 +136,9 @@ Create `tsconfig.json`:
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": false,
-    "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    "skipLibCheck": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -146,8 +146,9 @@ Create `tsconfig.json`:
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./*"] }
+    "baseUrl": ".",
+    "paths": { "@/*": ["./*"] },
+    "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules", "seed-node-v0.1"]
@@ -157,9 +158,13 @@ Create `tsconfig.json`:
 Create `vitest.config.ts`:
 
 ```ts
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./", import.meta.url)) },
+  },
   test: {
     environment: "node",
     include: ["tests/dws-production/**/*.test.ts"],
@@ -168,7 +173,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 3: Add a dedicated local PostgreSQL 16 test service**
+- [ ] **Step 3: Add dedicated PostgreSQL 16 local service**
 
 Create `infra/dws-production/docker-compose.yml`:
 
@@ -189,47 +194,41 @@ services:
       retries: 20
 ```
 
-Local test URL:
-
-```text
-postgresql://dws:dws_dev_password@127.0.0.1:55432/dws_production
-```
-
-- [ ] **Step 4: Write the failing database smoke test**
+- [ ] **Step 4: Write the failing DB smoke test**
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { getDb } from "@/lib/dws-production/db/client";
 
-describe("DWS database", () => {
-  it("connects to the configured PostgreSQL database", async () => {
-    const db = getDb();
-    const rows = await db<{ ok: number }[]>`select 1 as ok`;
-    expect(rows[0].ok).toBe(1);
-  });
+it("connects to DWS PostgreSQL", async () => {
+  const rows = await getDb()<[{ ok: number }]>`select 1::int as ok`;
+  expect(rows[0].ok).toBe(1);
 });
 ```
 
 Run:
 
 ```bash
+docker compose -f infra/dws-production/docker-compose.yml up -d
 DWS_TEST_DATABASE_URL=postgresql://dws:dws_dev_password@127.0.0.1:55432/dws_production npm run test:integration -- db-smoke
 ```
 
 Expected: FAIL because `client.ts` does not exist.
 
-- [ ] **Step 5: Implement the minimal DB client**
+- [ ] **Step 5: Implement database and tenant transaction helpers**
+
+Create `lib/dws-production/db/client.ts`:
 
 ```ts
 import postgres, { type Sql, type TransactionSql } from "postgres";
 
-let singleton: Sql | undefined;
+let db: Sql | undefined;
 
 export function getDb(): Sql {
   const url = process.env.DWS_TEST_DATABASE_URL ?? process.env.DWS_DATABASE_URL;
   if (!url) throw new Error("DWS_DATABASE_URL is required");
-  singleton ??= postgres(url, { max: 10, prepare: false });
-  return singleton;
+  db ??= postgres(url, { max: 10, prepare: false });
+  return db;
 }
 
 export async function withTransaction<T>(
@@ -237,17 +236,27 @@ export async function withTransaction<T>(
 ): Promise<T> {
   return getDb().begin(fn);
 }
+
+export async function withTenantTransaction<T>(
+  tenantId: string,
+  fn: (tx: TransactionSql) => Promise<T>,
+): Promise<T> {
+  return getDb().begin(async (tx) => {
+    await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+    return fn(tx);
+  });
+}
 ```
 
-Run the smoke test again and expect PASS.
+Run the smoke test again; expected PASS.
 
-- [ ] **Step 6: Verify the existing app still builds**
+- [ ] **Step 6: Verify the current app still builds**
 
 ```bash
 npm run build
 ```
 
-Expected: Next.js production build succeeds and existing MCP routes compile unchanged.
+Expected: Next.js build passes and existing MCP code is untouched.
 
 - [ ] **Step 7: Commit**
 
@@ -258,7 +267,7 @@ git commit -m "chore: establish DWS production test harness"
 
 ---
 
-### Task 2: Define canonical domain contracts, IDs, errors, and state transitions
+### Task 2: Define exact domain IDs, schemas, errors, and state machines
 
 **Files:**
 - Create: `lib/dws-production/domain/ids.ts`
@@ -268,27 +277,36 @@ git commit -m "chore: establish DWS production test harness"
 - Create: `tests/dws-production/domain.test.ts`
 
 **Interfaces:**
-- Produces: `makeDwsId(prefix, sequence)`, Zod schemas for node/LMO/work package/reservation/event/QA commands, `DwsError`, `assertLmoTransition`, `assertWorkPackageTransition`
+- `makeDwsId(prefix, sequence): string`
+- `DwsError`
+- `assertLmoTransition(from, to): void`
+- `assertWorkPackageTransition(from, to): void`
+- Zod command schemas used by HTTP/services
 
-- [ ] **Step 1: Write failing ID/state-machine tests**
+- [ ] **Step 1: Write failing domain tests**
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { makeDwsId } from "@/lib/dws-production/domain/ids";
-import { assertLmoTransition } from "@/lib/dws-production/domain/state-machines";
+import { assertLmoTransition, assertWorkPackageTransition } from "@/lib/dws-production/domain/state-machines";
 
-it("formats stable canonical IDs", () => {
+it("formats canonical IDs", () => {
   expect(makeDwsId("LMO-DWS", 42)).toBe("LMO-DWS-000042");
 });
 
-it("rejects illegal LMO transitions", () => {
+it("rejects illegal LMO transition", () => {
   expect(() => assertLmoTransition("planned", "completed")).toThrow("DWS_ILLEGAL_STATE_TRANSITION");
+});
+
+it("allows QA rework loop", () => {
+  expect(() => assertWorkPackageTransition("qa", "rework")).not.toThrow();
+  expect(() => assertWorkPackageTransition("rework", "submitted")).not.toThrow();
 });
 ```
 
-Run `npm run test:unit`; expected FAIL.
+- [ ] **Step 2: Implement canonical IDs and errors**
 
-- [ ] **Step 2: Implement canonical IDs**
+`ids.ts`:
 
 ```ts
 export function makeDwsId(prefix: string, sequence: number): string {
@@ -297,7 +315,7 @@ export function makeDwsId(prefix: string, sequence: number): string {
 }
 ```
 
-- [ ] **Step 3: Implement the typed error model**
+`errors.ts`:
 
 ```ts
 export type DwsErrorCode =
@@ -327,10 +345,14 @@ export class DwsError extends Error {
 }
 ```
 
-- [ ] **Step 4: Implement exact state transition tables**
+- [ ] **Step 3: Implement exact LMO and work-package transition tables**
+
+`state-machines.ts`:
 
 ```ts
-const LMO_TRANSITIONS: Record<string, readonly string[]> = {
+import { DwsError } from "./errors";
+
+export const LMO_TRANSITIONS = {
   planned: ["capacity_checked", "cancelled"],
   capacity_checked: ["reserved", "cancelled"],
   reserved: ["released", "cancelled"],
@@ -339,27 +361,58 @@ const LMO_TRANSITIONS: Record<string, readonly string[]> = {
   qa_hold: ["in_progress", "completed", "cancelled"],
   completed: [],
   cancelled: [],
-};
+} as const;
 
-export function assertLmoTransition(from: string, to: string): void {
-  if (!LMO_TRANSITIONS[from]?.includes(to)) {
+export const WORK_PACKAGE_TRANSITIONS = {
+  planned: ["reserved", "cancelled"],
+  reserved: ["released", "cancelled"],
+  released: ["in_progress", "cancelled"],
+  in_progress: ["blocked", "submitted", "cancelled"],
+  blocked: ["in_progress", "cancelled"],
+  submitted: ["qa", "cancelled"],
+  qa: ["rework", "accepted", "cancelled"],
+  rework: ["submitted", "cancelled"],
+  accepted: [],
+  cancelled: [],
+} as const;
+
+function assertTransition(map: Record<string, readonly string[]>, from: string, to: string) {
+  if (!map[from]?.includes(to)) {
     throw new DwsError("DWS_ILLEGAL_STATE_TRANSITION", `${from} -> ${to}`);
   }
 }
+
+export const assertLmoTransition = (from: string, to: string) => assertTransition(LMO_TRANSITIONS, from, to);
+export const assertWorkPackageTransition = (from: string, to: string) => assertTransition(WORK_PACKAGE_TRANSITIONS, from, to);
 ```
 
-Implement the work-package transition table directly from the approved spec.
+- [ ] **Step 4: Implement exact command schemas**
 
-- [ ] **Step 5: Add Zod command schemas**
-
-At minimum export `RegisterNodeSchema`, `CreateLmoSchema`, `CapacityHoldSchema`, `ProductionEventSchema`, `InspectionResultSchema`, and `NonconformanceSchema`. Every license-linked command includes `tenantId`; every mutation includes `idempotencyKey`.
-
-Example:
+`schemas.ts` exports these shapes:
 
 ```ts
-export const CreateLmoSchema = z.object({
+import { z } from "zod";
+
+const mutation = {
   tenantId: z.string().min(1),
   idempotencyKey: z.string().min(8),
+};
+
+export const RegisterNodeSchema = z.object({
+  ...mutation,
+  productionNodeId: z.string().regex(/^PN-DWS-\d{6}$/),
+  nodeType: z.enum(["internal_team", "contractor", "qa_cell", "automation", "deployment_cell"]),
+  operatorId: z.string().min(1),
+  name: z.string().min(1),
+  status: z.enum(["active", "conditional", "suspended", "retired"]),
+  genesisPrincipalId: z.string().min(1),
+  wardenPolicyId: z.string().min(1),
+  securityClassification: z.string().min(1),
+  approvedProductClasses: z.array(z.string().min(1)),
+});
+
+export const CreateLmoSchema = z.object({
+  ...mutation,
   licenseId: z.string().min(1),
   configurationId: z.string().min(1),
   productVersionIds: z.array(z.string().min(1)).min(1),
@@ -369,9 +422,55 @@ export const CreateLmoSchema = z.object({
   requestedStartAt: z.string().datetime(),
   requiredCompletionAt: z.string().datetime(),
 });
+
+export const CapacityHoldSchema = z.object({
+  ...mutation,
+  sourceType: z.enum(["simulation", "quote", "lmo"]),
+  sourceId: z.string().min(1),
+  expiresAt: z.string().datetime(),
+  allocations: z.array(z.object({
+    productionNodeId: z.string().regex(/^PN-DWS-\d{6}$/),
+    date: z.string().date(),
+    capacityUnit: z.enum(["engineering_hour", "qa_hour", "deployment_slot", "build_slot"]),
+    reservedUnits: z.number().positive(),
+  })).min(1),
+});
+
+export const ProductionEventSchema = z.object({
+  ...mutation,
+  aggregateType: z.enum(["lmo", "work_package", "assignment", "qa_inspection"]),
+  aggregateId: z.string().min(1),
+  eventType: z.string().min(1),
+  occurredAt: z.string().datetime(),
+  actorPrincipalId: z.string().min(1),
+  payload: z.record(z.unknown()).default({}),
+  wardenDecisionId: z.string().min(1).optional(),
+  riverReceiptId: z.string().min(1).optional(),
+});
+
+export const InspectionResultSchema = z.object({
+  ...mutation,
+  qaInspectionId: z.string().min(1),
+  result: z.enum(["pass", "pass_with_exception", "fail"]),
+  score: z.number().min(0).max(100).optional(),
+  criticalFailures: z.number().int().nonnegative(),
+  majorFailures: z.number().int().nonnegative(),
+  minorFailures: z.number().int().nonnegative(),
+  evidenceReceiptId: z.string().min(1).optional(),
+});
+
+export const NonconformanceSchema = z.object({
+  ...mutation,
+  qaInspectionId: z.string().min(1),
+  workPackageId: z.string().min(1),
+  severity: z.enum(["critical", "major", "minor"]),
+  category: z.string().min(1),
+  description: z.string().min(1),
+  ownerNodeId: z.string().regex(/^PN-DWS-\d{6}$/),
+});
 ```
 
-- [ ] **Step 6: Run unit tests and build**
+- [ ] **Step 5: Run unit tests and build**
 
 ```bash
 npm run test:unit
@@ -380,7 +479,7 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add lib/dws-production/domain tests/dws-production/domain.test.ts
@@ -389,237 +488,605 @@ git commit -m "feat: define DWS production domain contracts"
 
 ---
 
-### Task 3: Create the canonical PostgreSQL schema and migration runner
+### Task 3: Create canonical PostgreSQL schema, RLS boundary, append-only ledger, and migrations
 
 **Files:**
 - Create: `db/dws-production/001_r04_core.sql`
 - Create: `db/dws-production/002_r04_indexes.sql`
 - Create: `lib/dws-production/db/migrate.ts`
-- Create: `scripts/dws-migrate.mjs`
 - Create: `tests/dws-production/schema.integration.test.ts`
 
 **Interfaces:**
-- Produces schemas: `dws_core`, `dws_capacity`, `dws_routing`, `dws_quality`, `dws_ledger`
-- Produces tables named in the approved spec plus `reservation_allocations` and `idempotency_keys` needed for exact concurrency semantics.
+- Schemas: `dws_core`, `dws_capacity`, `dws_routing`, `dws_quality`, `dws_ledger`
+- Migration command: `npm run dws:migrate`
 
-- [ ] **Step 1: Write a failing schema test**
-
-Test that after migration the following relations exist: `dws_core.production_nodes`, `dws_core.production_node_versions`, `dws_core.node_capabilities`, `dws_core.manufacturing_recipes`, `dws_core.manufacturing_recipe_steps`, `dws_core.lmos`, `dws_core.work_packages`, `dws_core.work_package_dependencies`, `dws_core.assignments`, `dws_capacity.capacity_buckets`, `dws_capacity.reservation_groups`, `dws_capacity.reservations`, `dws_capacity.reservation_allocations`, `dws_routing.routing_decisions`, `dws_routing.routing_candidates`, `dws_quality.inspections`, `dws_quality.nonconformances`, `dws_quality.performance_snapshots`, `dws_ledger.production_events`, `dws_ledger.idempotency_keys`.
-
-Use:
+- [ ] **Step 1: Write failing schema invariants test**
 
 ```ts
-const rows = await db<{ table_schema: string; table_name: string }[]>`
-  select table_schema, table_name
-  from information_schema.tables
-  where table_schema like 'dws_%'
-`;
-expect(new Set(rows.map(r => `${r.table_schema}.${r.table_name}`))).toContain("dws_core.production_nodes");
+import { expect, it } from "vitest";
+import { getDb } from "@/lib/dws-production/db/client";
+
+it("installs the R0.4 canonical relations", async () => {
+  const rows = await getDb()<Array<{ table_schema: string; table_name: string }>>`
+    select table_schema, table_name
+    from information_schema.tables
+    where table_schema like 'dws_%'
+  `;
+  const names = new Set(rows.map((r) => `${r.table_schema}.${r.table_name}`));
+  for (const required of [
+    "dws_core.production_nodes",
+    "dws_core.production_node_versions",
+    "dws_core.node_capabilities",
+    "dws_core.manufacturing_recipes",
+    "dws_core.manufacturing_recipe_steps",
+    "dws_core.lmos",
+    "dws_core.work_packages",
+    "dws_core.work_package_dependencies",
+    "dws_core.assignments",
+    "dws_capacity.capacity_buckets",
+    "dws_capacity.reservation_groups",
+    "dws_capacity.reservation_allocations",
+    "dws_routing.routing_decisions",
+    "dws_routing.routing_candidates",
+    "dws_quality.inspections",
+    "dws_quality.nonconformances",
+    "dws_quality.performance_snapshots",
+    "dws_ledger.production_events",
+    "dws_ledger.idempotency_keys",
+  ]) expect(names.has(required)).toBe(true);
+});
 ```
 
-- [ ] **Step 2: Implement `001_r04_core.sql`**
+- [ ] **Step 2: Implement `001_r04_core.sql` with exact table families**
 
-Use `TEXT` canonical IDs as external primary keys, `tenant_id TEXT NOT NULL` on every tenant-bound aggregate, `TIMESTAMPTZ`, explicit `CHECK` constraints for enum-like state fields, and foreign keys between aggregate records. Use `JSONB` only for event payload/evidence metadata, not for fields needed for routing/capacity predicates.
-
-Critical capacity tables must include:
+Use this skeleton and preserve the listed columns/constraints when expanding foreign keys:
 
 ```sql
-CREATE TABLE dws_capacity.capacity_buckets (
-  tenant_id TEXT NOT NULL,
-  production_node_id TEXT NOT NULL,
-  capacity_date DATE NOT NULL,
-  capacity_unit TEXT NOT NULL,
-  nominal_units NUMERIC(14,4) NOT NULL CHECK (nominal_units >= 0),
-  maintenance_units NUMERIC(14,4) NOT NULL DEFAULT 0 CHECK (maintenance_units >= 0),
-  leave_units NUMERIC(14,4) NOT NULL DEFAULT 0 CHECK (leave_units >= 0),
-  PRIMARY KEY (tenant_id, production_node_id, capacity_date, capacity_unit)
+create schema if not exists dws_core;
+create schema if not exists dws_capacity;
+create schema if not exists dws_routing;
+create schema if not exists dws_quality;
+create schema if not exists dws_ledger;
+
+create table dws_core.production_nodes (
+  production_node_id text primary key,
+  tenant_id text not null,
+  operator_id text not null,
+  name text not null,
+  created_at timestamptz not null default now()
 );
 
-CREATE TABLE dws_capacity.reservation_groups (
-  reservation_group_id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  reservation_type TEXT NOT NULL CHECK (reservation_type IN ('tentative','committed')),
-  source_type TEXT NOT NULL CHECK (source_type IN ('simulation','quote','lmo')),
-  source_id TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('active','converted','released','expired','cancelled')),
-  expires_at TIMESTAMPTZ,
-  authority_ref TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+create table dws_core.production_node_versions (
+  production_node_version_id text primary key,
+  production_node_id text not null references dws_core.production_nodes,
+  tenant_id text not null,
+  node_type text not null check (node_type in ('internal_team','contractor','qa_cell','automation','deployment_cell')),
+  status text not null check (status in ('active','conditional','suspended','retired')),
+  genesis_principal_id text not null,
+  warden_policy_id text not null,
+  security_classification text not null,
+  approved_product_classes text[] not null default '{}',
+  effective_from timestamptz not null,
+  effective_to timestamptz,
+  supersedes_version_id text references dws_core.production_node_versions
 );
 
-CREATE TABLE dws_capacity.reservation_allocations (
-  reservation_group_id TEXT NOT NULL REFERENCES dws_capacity.reservation_groups(reservation_group_id),
-  tenant_id TEXT NOT NULL,
-  production_node_id TEXT NOT NULL,
-  capacity_date DATE NOT NULL,
-  capacity_unit TEXT NOT NULL,
-  reserved_units NUMERIC(14,4) NOT NULL CHECK (reserved_units > 0),
-  PRIMARY KEY (reservation_group_id, production_node_id, capacity_date, capacity_unit)
+create table dws_core.node_capabilities (
+  node_capability_id text primary key,
+  production_node_version_id text not null references dws_core.production_node_versions,
+  tenant_id text not null,
+  capability_code text not null,
+  skill_level int not null check (skill_level between 1 and 5),
+  max_parallel_units int not null check (max_parallel_units > 0),
+  capacity_unit text not null check (capacity_unit in ('engineering_hour','qa_hour','deployment_slot','build_slot')),
+  product_class_allowlist text[] not null default '{}',
+  required_policy_ids text[] not null default '{}',
+  effective_from timestamptz not null,
+  effective_to timestamptz
 );
+
+create table dws_core.manufacturing_recipes (
+  manufacturing_recipe_id text primary key,
+  tenant_id text not null,
+  product_version_id text not null,
+  recipe_version text not null,
+  effective_from timestamptz not null,
+  unique (tenant_id, product_version_id, recipe_version)
+);
+
+create table dws_core.manufacturing_recipe_steps (
+  recipe_step_id text primary key,
+  manufacturing_recipe_id text not null references dws_core.manufacturing_recipes on delete cascade,
+  tenant_id text not null,
+  sequence_key text not null,
+  name text not null,
+  work_type text not null,
+  required_capability_code text not null,
+  minimum_skill_level int not null check (minimum_skill_level between 1 and 5),
+  estimated_effort_units numeric(14,4) not null check (estimated_effort_units > 0),
+  capacity_unit text not null,
+  qa_specification_id text not null,
+  security_classification text not null,
+  predecessor_sequence_keys text[] not null default '{}'
+);
+
+create table dws_core.lmos (
+  lmo_id text primary key,
+  tenant_id text not null,
+  license_id text not null,
+  configuration_id text not null,
+  product_version_ids text[] not null,
+  production_reason text not null check (production_reason in ('initial','upgrade','expansion','remediation','connector_addition')),
+  route_policy text not null check (route_policy in ('internal','contracted','hybrid','client_operated')),
+  priority text not null check (priority in ('standard','urgent','critical')),
+  requested_start_at timestamptz not null,
+  required_completion_at timestamptz not null,
+  state text not null check (state in ('planned','capacity_checked','reserved','released','in_progress','qa_hold','completed','cancelled')),
+  warden_decision_id text,
+  river_receipt_id text,
+  created_at timestamptz not null default now()
+);
+
+create table dws_core.work_packages (
+  work_package_id text primary key,
+  tenant_id text not null,
+  lmo_id text not null references dws_core.lmos on delete cascade,
+  sequence_key text not null,
+  name text not null,
+  work_type text not null,
+  required_capability_code text not null,
+  minimum_skill_level int not null,
+  estimated_effort_units numeric(14,4) not null,
+  capacity_unit text not null,
+  security_classification text not null,
+  qa_specification_id text not null,
+  planned_start_at timestamptz,
+  planned_finish_at timestamptz,
+  state text not null check (state in ('planned','reserved','released','in_progress','blocked','submitted','qa','rework','accepted','cancelled')),
+  unique (tenant_id, lmo_id, sequence_key)
+);
+
+create table dws_core.work_package_dependencies (
+  dependency_id text primary key,
+  tenant_id text not null,
+  predecessor_work_package_id text not null references dws_core.work_packages,
+  successor_work_package_id text not null references dws_core.work_packages,
+  dependency_type text not null default 'finish_to_start' check (dependency_type = 'finish_to_start'),
+  minimum_lag_units numeric(14,4) not null default 0,
+  lag_unit text not null default 'hour' check (lag_unit in ('hour','day'))
+);
+
+create table dws_capacity.capacity_buckets (
+  tenant_id text not null,
+  production_node_id text not null references dws_core.production_nodes,
+  capacity_date date not null,
+  capacity_unit text not null,
+  nominal_units numeric(14,4) not null check (nominal_units >= 0),
+  maintenance_units numeric(14,4) not null default 0 check (maintenance_units >= 0),
+  leave_units numeric(14,4) not null default 0 check (leave_units >= 0),
+  primary key (tenant_id, production_node_id, capacity_date, capacity_unit)
+);
+
+create table dws_capacity.reservation_groups (
+  reservation_group_id text primary key,
+  tenant_id text not null,
+  reservation_type text not null check (reservation_type in ('tentative','committed')),
+  source_type text not null check (source_type in ('simulation','quote','lmo')),
+  source_id text not null,
+  state text not null check (state in ('active','converted','released','expired','cancelled')),
+  expires_at timestamptz,
+  authority_ref text,
+  predecessor_group_id text references dws_capacity.reservation_groups,
+  created_at timestamptz not null default now(),
+  check ((reservation_type = 'tentative' and expires_at is not null) or reservation_type = 'committed')
+);
+
+create table dws_capacity.reservation_allocations (
+  reservation_group_id text not null references dws_capacity.reservation_groups on delete cascade,
+  tenant_id text not null,
+  production_node_id text not null references dws_core.production_nodes,
+  work_package_id text references dws_core.work_packages,
+  capacity_date date not null,
+  capacity_unit text not null,
+  reserved_units numeric(14,4) not null check (reserved_units > 0),
+  primary key (reservation_group_id, production_node_id, capacity_date, capacity_unit)
+);
+
+create table dws_routing.routing_decisions (
+  routing_decision_id text primary key,
+  tenant_id text not null,
+  work_package_id text not null references dws_core.work_packages,
+  algorithm_version text not null,
+  weight_profile_id text not null,
+  selected_node_id text,
+  selected_node_version_id text,
+  selected_performance_snapshot_id text,
+  final_score numeric(8,4),
+  warden_decision_id text,
+  river_receipt_id text,
+  decided_at timestamptz not null default now()
+);
+
+create table dws_routing.routing_candidates (
+  routing_decision_id text not null references dws_routing.routing_decisions on delete cascade,
+  tenant_id text not null,
+  production_node_id text not null,
+  production_node_version_id text not null,
+  eligible boolean not null,
+  reasons text[] not null default '{}',
+  component_scores jsonb not null default '{}'::jsonb,
+  final_score numeric(8,4),
+  primary key (routing_decision_id, production_node_id)
+);
+
+create table dws_core.assignments (
+  assignment_id text primary key,
+  tenant_id text not null,
+  work_package_id text not null references dws_core.work_packages,
+  production_node_id text not null references dws_core.production_nodes,
+  production_node_version_id text not null references dws_core.production_node_versions,
+  reservation_group_id text not null references dws_capacity.reservation_groups,
+  routing_decision_id text references dws_routing.routing_decisions,
+  manual_override_warden_decision_id text,
+  assigned_by_principal_id text not null,
+  state text not null check (state in ('assigned','active','completed','revoked')),
+  assigned_at timestamptz not null default now(),
+  check (routing_decision_id is not null or manual_override_warden_decision_id is not null)
+);
+
+create table dws_quality.inspections (
+  qa_inspection_id text primary key,
+  tenant_id text not null,
+  work_package_id text not null references dws_core.work_packages,
+  lmo_id text not null references dws_core.lmos,
+  qa_specification_id text not null,
+  inspector_node_id text not null references dws_core.production_nodes,
+  inspection_round int not null check (inspection_round > 0),
+  started_at timestamptz not null,
+  completed_at timestamptz,
+  result text not null check (result in ('pending','pass','pass_with_exception','fail')),
+  score numeric(6,2),
+  critical_failures int not null default 0,
+  major_failures int not null default 0,
+  minor_failures int not null default 0,
+  evidence_receipt_id text
+);
+
+create table dws_quality.nonconformances (
+  nonconformance_id text primary key,
+  tenant_id text not null,
+  qa_inspection_id text not null references dws_quality.inspections,
+  work_package_id text not null references dws_core.work_packages,
+  severity text not null check (severity in ('critical','major','minor')),
+  category text not null,
+  description text not null,
+  state text not null check (state in ('open','rework','accepted_exception','closed')),
+  owner_node_id text not null references dws_core.production_nodes,
+  warden_exception_decision_id text,
+  opened_at timestamptz not null default now(),
+  closed_at timestamptz,
+  closure_evidence_receipt_id text
+);
+
+create table dws_quality.performance_snapshots (
+  node_performance_snapshot_id text primary key,
+  tenant_id text not null,
+  production_node_id text not null references dws_core.production_nodes,
+  period_start timestamptz not null,
+  period_end timestamptz not null,
+  sample_size int not null,
+  on_time_rate numeric(8,6),
+  first_pass_yield numeric(8,6),
+  defect_escape_rate numeric(8,6),
+  average_cycle_time numeric(14,4),
+  cost_adherence numeric(8,6),
+  client_defect_rate numeric(8,6),
+  quality_score numeric(8,4),
+  delivery_score numeric(8,4),
+  composite_vendor_score numeric(8,4),
+  algorithm_version text not null,
+  calculated_at timestamptz not null default now()
+);
+
+create table dws_ledger.event_type_registry (
+  event_type text primary key
+);
+
+insert into dws_ledger.event_type_registry(event_type) values
+('LMO_CREATED'),('CAPACITY_CHECKED'),('CAPACITY_RESERVED'),('CAPACITY_RESERVATION_EXPIRED'),
+('WORK_PACKAGE_RELEASED'),('WORK_ASSIGNED'),('WORK_STARTED'),('WORK_BLOCKED'),('WORK_RESUMED'),
+('BUILD_SUBMITTED'),('QA_STARTED'),('QA_FAILED'),('NONCONFORMANCE_OPENED'),('REWORK_REQUESTED'),
+('REWORK_SUBMITTED'),('QA_PASSED'),('DEPLOYMENT_APPROVED'),('WORK_COMPLETED'),('LMO_COMPLETED'),('ASSIGNMENT_REVOKED')
+on conflict do nothing;
+
+create table dws_ledger.production_events (
+  production_event_id text primary key,
+  tenant_id text not null,
+  aggregate_type text not null check (aggregate_type in ('lmo','work_package','assignment','qa_inspection')),
+  aggregate_id text not null,
+  event_type text not null references dws_ledger.event_type_registry,
+  occurred_at timestamptz not null,
+  recorded_at timestamptz not null default now(),
+  actor_principal_id text not null,
+  payload jsonb not null default '{}'::jsonb,
+  warden_decision_id text,
+  river_receipt_id text,
+  idempotency_key text not null,
+  supersedes_event_id text references dws_ledger.production_events,
+  unique (tenant_id, idempotency_key)
+);
+
+create table dws_ledger.idempotency_keys (
+  tenant_id text not null,
+  idempotency_key text not null,
+  request_hash text not null,
+  response_json jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (tenant_id, idempotency_key)
+);
+
+create or replace function dws_ledger.prevent_event_mutation() returns trigger language plpgsql as $$
+begin
+  raise exception 'production_events is append-only';
+end;
+$$;
+
+create trigger production_events_no_update
+before update or delete on dws_ledger.production_events
+for each row execute function dws_ledger.prevent_event_mutation();
 ```
 
-- [ ] **Step 3: Implement indexes in `002_r04_indexes.sql`**
+Enable RLS on every tenant-bound table. For each table `T`, use the same policy pattern:
 
-Add indexes for tenant + state + time queries, node/capability eligibility, work-package dependencies, active reservation allocation lookup, event aggregate replay, QA/NCR blocking lookup, and idempotency-key lookup.
-
-- [ ] **Step 4: Implement migration runner**
-
-`migrate.ts` must create `dws_ledger.schema_migrations`, read SQL files in lexical order, hash contents with SHA-256, refuse a changed already-applied migration, and apply each migration transactionally.
-
-- [ ] **Step 5: Add the CLI wrapper**
-
-`scripts/dws-migrate.mjs` imports the compiled/runtime TypeScript migration entry through Next-compatible module resolution by invoking `npx tsx lib/dws-production/db/migrate.ts`; therefore add `tsx` as a dev dependency and make the npm script `dws:migrate` equal to `tsx lib/dws-production/db/migrate.ts` instead of shelling recursively.
-
-- [ ] **Step 6: Run migrations and schema test**
-
-```bash
-DWS_TEST_DATABASE_URL=postgresql://dws:dws_dev_password@127.0.0.1:55432/dws_production npm run dws:migrate
-DWS_TEST_DATABASE_URL=postgresql://dws:dws_dev_password@127.0.0.1:55432/dws_production npm run test:integration -- schema
+```sql
+alter table dws_core.lmos enable row level security;
+create policy lmos_tenant_policy on dws_core.lmos
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
 ```
 
-Expected: PASS.
+Apply the equivalent policy to all tenant-bound tables created above.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 3: Add exact performance/concurrency indexes**
+
+`002_r04_indexes.sql`:
+
+```sql
+create index on dws_core.production_node_versions (tenant_id, production_node_id, effective_from desc);
+create index on dws_core.node_capabilities (tenant_id, capability_code, production_node_version_id);
+create index on dws_core.work_packages (tenant_id, lmo_id, state);
+create index on dws_core.work_package_dependencies (tenant_id, successor_work_package_id);
+create index on dws_capacity.reservation_groups (tenant_id, state, reservation_type, expires_at);
+create index on dws_capacity.reservation_allocations (tenant_id, production_node_id, capacity_date, capacity_unit);
+create index on dws_routing.routing_decisions (tenant_id, work_package_id, decided_at desc);
+create index on dws_quality.inspections (tenant_id, work_package_id, inspection_round desc);
+create index on dws_quality.nonconformances (tenant_id, work_package_id, state, severity);
+create index on dws_quality.performance_snapshots (tenant_id, production_node_id, calculated_at desc);
+create index on dws_ledger.production_events (tenant_id, aggregate_type, aggregate_id, recorded_at, production_event_id);
+```
+
+- [ ] **Step 4: Implement checksum-aware migration runner**
+
+`lib/dws-production/db/migrate.ts`:
+
+```ts
+import { createHash } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { getDb } from "./client";
+
+const db = getDb();
+await db`create schema if not exists dws_ledger`;
+await db`create table if not exists dws_ledger.schema_migrations (
+  filename text primary key,
+  sha256 text not null,
+  applied_at timestamptz not null default now()
+)`;
+
+for (const filename of (await readdir(resolve("db/dws-production"))).filter((x) => x.endsWith(".sql")).sort()) {
+  const sqlText = await readFile(resolve("db/dws-production", filename), "utf8");
+  const sha256 = createHash("sha256").update(sqlText).digest("hex");
+  const [prior] = await db<Array<{ sha256: string }>>`select sha256 from dws_ledger.schema_migrations where filename=${filename}`;
+  if (prior) {
+    if (prior.sha256 !== sha256) throw new Error(`Applied migration changed: ${filename}`);
+    continue;
+  }
+  await db.begin(async (tx) => {
+    await tx.unsafe(sqlText);
+    await tx`insert into dws_ledger.schema_migrations(filename, sha256) values (${filename}, ${sha256})`;
+  });
+}
+await db.end();
+```
+
+- [ ] **Step 5: Run migration and schema tests**
 
 ```bash
-git add db/dws-production lib/dws-production/db/migrate.ts scripts/dws-migrate.mjs tests/dws-production/schema.integration.test.ts package.json package-lock.json
-git commit -m "feat: add DWS production database schema"
+export DWS_TEST_DATABASE_URL=postgresql://dws:dws_dev_password@127.0.0.1:55432/dws_production
+npm run dws:migrate
+npm run test:integration -- schema
+```
+
+Expected: PASS. Also verify `update dws_ledger.production_events ...` fails in a dedicated test.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add db/dws-production lib/dws-production/db/migrate.ts tests/dws-production/schema.integration.test.ts
+git commit -m "feat: add canonical DWS production schema"
 ```
 
 ---
 
-### Task 4: Implement production-node registry and deterministic capacity projections
+### Task 4: Implement production-node registry, capacity projection, manufacturing recipes, and LMO scheduling
 
 **Files:**
 - Create: `lib/dws-production/db/repositories.ts`
 - Create: `lib/dws-production/services/nodes.ts`
-- Create: `tests/dws-production/nodes.integration.test.ts`
-
-**Interfaces:**
-- Produces: `registerProductionNode`, `createProductionNodeVersion`, `addNodeCapability`, `upsertCapacityBucket`, `getAvailableCapacity`
-
-- [ ] **Step 1: Write failing node/version tests**
-
-Test that:
-
-1. registering a node produces stable `production_node_id`;
-2. changing capability/governance creates a new immutable version rather than mutating the previous row;
-3. an assignment can later reference the old version;
-4. capacity availability subtracts active tentative + committed allocations but ignores released/expired groups.
-
-- [ ] **Step 2: Implement repository primitives**
-
-Keep SQL access explicit. Example signature:
-
-```ts
-export interface DwsRepositories {
-  insertNode(tx: SqlLike, input: InsertNode): Promise<ProductionNode>;
-  insertNodeVersion(tx: SqlLike, input: InsertNodeVersion): Promise<ProductionNodeVersion>;
-  listEligibleCapabilities(tx: SqlLike, tenantId: string, capabilityCode: string): Promise<NodeCapabilityRow[]>;
-  lockCapacityBuckets(tx: SqlLike, keys: CapacityBucketKey[]): Promise<CapacityBucketRow[]>;
-}
-```
-
-Do not hide transactions inside repository methods; services own transaction boundaries.
-
-- [ ] **Step 3: Implement capacity projection**
-
-`getAvailableCapacity` queries the bucket plus active reservation allocations and returns:
-
-```ts
-{
-  nominalUnits,
-  maintenanceUnits,
-  leaveUnits,
-  tentativeReservedUnits,
-  committedReservedUnits,
-  availableUnits: Math.max(0, nominal - maintenance - leave - tentative - committed),
-}
-```
-
-- [ ] **Step 4: Run integration tests**
-
-```bash
-npm run test:integration -- nodes
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add lib/dws-production/db/repositories.ts lib/dws-production/services/nodes.ts tests/dws-production/nodes.integration.test.ts
-git commit -m "feat: add production node and capacity registry"
-```
-
----
-
-### Task 5: Implement manufacturing recipes, LMO decomposition, DAG validation, and forward scheduling
-
-**Files:**
 - Create: `lib/dws-production/services/decomposition.ts`
 - Create: `lib/dws-production/domain/scheduling.ts`
+- Create: `tests/dws-production/nodes.integration.test.ts`
 - Create: `tests/dws-production/scheduling.test.ts`
 - Create: `tests/dws-production/lmo.integration.test.ts`
 
 **Interfaces:**
-- Produces: `decomposeConfiguration`, `validateDag`, `calculateCriticalPath`, `forwardSchedule`
+- `registerProductionNode()`
+- `createProductionNodeVersion()`
+- `addNodeCapability()`
+- `upsertCapacityBucket()`
+- `getAvailableCapacity()`
+- `decomposeConfiguration()`
+- `validateDag()`
+- `forwardSchedule()`
 
-- [ ] **Step 1: Write failing DAG tests**
+- [ ] **Step 1: Define repository interfaces with caller-owned transactions**
+
+`repositories.ts` starts with:
 
 ```ts
-it("rejects cyclic manufacturing recipes", () => {
-  expect(() => validateDag([
-    { predecessor: "WP-A", successor: "WP-B" },
-    { predecessor: "WP-B", successor: "WP-A" },
-  ])).toThrow("DWS_DEPENDENCY_INCOMPLETE");
+import type { TransactionSql } from "postgres";
+
+export type SqlTx = TransactionSql;
+
+export async function lockCapacityBucket(
+  tx: SqlTx,
+  tenantId: string,
+  productionNodeId: string,
+  capacityDate: string,
+  capacityUnit: string,
+) {
+  const [row] = await tx`
+    select * from dws_capacity.capacity_buckets
+    where tenant_id=${tenantId}
+      and production_node_id=${productionNodeId}
+      and capacity_date=${capacityDate}::date
+      and capacity_unit=${capacityUnit}
+    for update
+  `;
+  return row;
+}
+```
+
+Add focused functions for node/version/capability insert/read, recipe read, LMO/work-package/dependency insert, active reservation aggregation, and event insert. Do not open nested transactions in repositories.
+
+- [ ] **Step 2: Write node/version/capacity tests**
+
+Test that changing a capability/governance profile creates a new version row while the old version remains queryable. Test capacity projection:
+
+```ts
+expect(await getAvailableCapacity(key)).toEqual({
+  nominalUnits: 8,
+  maintenanceUnits: 1,
+  leaveUnits: 1,
+  tentativeReservedUnits: 2,
+  committedReservedUnits: 1,
+  availableUnits: 3,
 });
 ```
 
-Also test a known nine-step order recipe and assert the critical path follows the configured finish-to-start chain.
+- [ ] **Step 3: Implement node/version and capacity services**
 
-- [ ] **Step 2: Implement topological sorting and critical-path math**
-
-Use Kahn's algorithm. Keep all scheduling pure and dependency-type fixed to `finish_to_start` for R0.4.0.
-
-`forwardSchedule` accepts:
+Use tenant transactions for every write:
 
 ```ts
-export type ForwardScheduleInput = {
-  requestedStart: Date;
-  workPackages: ScheduledWorkPackage[];
-  dependencies: WorkDependency[];
-  capacityWindows: Record<string, CapacityWindow[]>;
+export async function getAvailableCapacity(key: CapacityBucketKey) {
+  return withTenantTransaction(key.tenantId, async (tx) => {
+    const bucket = await readCapacityBucket(tx, key);
+    const reserved = await sumActiveReservations(tx, key);
+    const availableUnits = Math.max(0,
+      Number(bucket.nominal_units)
+      - Number(bucket.maintenance_units)
+      - Number(bucket.leave_units)
+      - reserved.tentative
+      - reserved.committed,
+    );
+    return {
+      nominalUnits: Number(bucket.nominal_units),
+      maintenanceUnits: Number(bucket.maintenance_units),
+      leaveUnits: Number(bucket.leave_units),
+      tentativeReservedUnits: reserved.tentative,
+      committedReservedUnits: reserved.committed,
+      availableUnits,
+    };
+  });
+}
+```
+
+- [ ] **Step 4: Write DAG/scheduling tests**
+
+```ts
+expect(() => validateDag([
+  { predecessor: "A", successor: "B" },
+  { predecessor: "B", successor: "A" },
+])).toThrow("DWS_DEPENDENCY_INCOMPLETE");
+```
+
+For an acyclic fixture, assert deterministic topological order and critical path.
+
+- [ ] **Step 5: Implement Kahn DAG validation and deterministic forward schedule**
+
+`scheduling.ts` uses lexical ordering when multiple nodes have indegree zero:
+
+```ts
+export function validateDag(nodes: string[], edges: WorkDependency[]): string[] {
+  const indegree = new Map(nodes.map((n) => [n, 0]));
+  const outgoing = new Map(nodes.map((n) => [n, [] as string[]]));
+  for (const e of edges) {
+    if (!indegree.has(e.predecessor) || !indegree.has(e.successor)) {
+      throw new DwsError("DWS_DEPENDENCY_INCOMPLETE", "dependency references missing work package");
+    }
+    indegree.set(e.successor, indegree.get(e.successor)! + 1);
+    outgoing.get(e.predecessor)!.push(e.successor);
+  }
+  const queue = [...nodes.filter((n) => indegree.get(n) === 0)].sort();
+  const order: string[] = [];
+  while (queue.length) {
+    const n = queue.shift()!;
+    order.push(n);
+    for (const next of outgoing.get(n)!.sort()) {
+      indegree.set(next, indegree.get(next)! - 1);
+      if (indegree.get(next) === 0) queue.push(next), queue.sort();
+    }
+  }
+  if (order.length !== nodes.length) throw new DwsError("DWS_DEPENDENCY_INCOMPLETE", "cycle detected");
+  return order;
+}
+```
+
+`forwardSchedule()` walks this order and calculates each package's earliest start as the max of requested start, predecessor finish, and first capacity-feasible assigned-node window. It returns `planned`, `criticalPath`, `earliestFeasibleCompletion`, `bottleneckCapability`, and affected capacity dates.
+
+- [ ] **Step 6: Implement deterministic recipe decomposition**
+
+`decomposeConfiguration()` accepts exact product-version IDs and configuration version, loads matching recipes, emits work packages/dependencies, validates the DAG, creates the LMO in one transaction, and appends `LMO_CREATED`. Same tenant/idempotency-key + same request hash returns the prior result; same key + different hash throws `DWS_IDEMPOTENCY_CONFLICT`.
+
+```ts
+export type DecomposeConfigurationInput = {
+  tenantId: string;
+  idempotencyKey: string;
+  licenseId: string;
+  configurationId: string;
+  configurationVersion: string;
+  productVersionIds: string[];
+  requestedStartAt: Date;
+  requiredCompletionAt: Date;
+  productionReason: "initial" | "upgrade" | "expansion" | "remediation" | "connector_addition";
+  routePolicy: "internal" | "contracted" | "hybrid" | "client_operated";
+  priority: "standard" | "urgent" | "critical";
 };
 ```
 
-and returns planned start/finish for each package plus `criticalPath`, `earliestFeasibleCompletion`, and `bottleneckCapability`.
-
-- [ ] **Step 3: Implement deterministic recipe decomposition**
-
-`decomposeConfiguration` loads exact product-version recipes, verifies configuration version IDs, creates one LMO plus versioned work-package rows and dependency rows in one transaction, and appends `LMO_CREATED` only after persistence succeeds.
-
-A second call with the same idempotency key returns the prior LMO rather than creating duplicates.
-
-- [ ] **Step 4: Run tests**
+- [ ] **Step 7: Run and commit**
 
 ```bash
 npm run test:unit -- scheduling
-npm run test:integration -- lmo
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add lib/dws-production/services/decomposition.ts lib/dws-production/domain/scheduling.ts tests/dws-production/scheduling.test.ts tests/dws-production/lmo.integration.test.ts
-git commit -m "feat: decompose DWS license manufacturing orders"
+npm run test:integration -- nodes lmo
+git add lib/dws-production/db/repositories.ts lib/dws-production/services/nodes.ts lib/dws-production/services/decomposition.ts lib/dws-production/domain/scheduling.ts tests/dws-production
+git commit -m "feat: add DWS node registry and LMO scheduling"
 ```
 
 ---
 
-### Task 6: Implement eligibility, routing scores, deterministic tie-breaking, and governed override records
+### Task 5: Implement eligibility, routing scores, deterministic tie-breaking, and persisted route evidence
 
 **Files:**
 - Create: `lib/dws-production/domain/scoring.ts`
@@ -628,222 +1095,253 @@ git commit -m "feat: decompose DWS license manufacturing orders"
 - Create: `tests/dws-production/routing.integration.test.ts`
 
 **Interfaces:**
-- Produces: `evaluateEligibility`, `scoreRouteCandidate`, `selectRoute`, `persistRoutingDecision`
+- `evaluateEligibility(input): EligibilityResult`
+- `scoreRouteCandidate(input): ScoredCandidate`
+- `selectRoute(candidates): ScoredCandidate`
+- `persistRoutingDecision(...)`
 
-- [ ] **Step 1: Write failing eligibility tests**
+- [ ] **Step 1: Write hard-predicate eligibility tests**
 
-Cover every hard predicate from the spec. Explicitly assert:
+Include all predicates and this conditional-node case:
 
 ```ts
-expect(evaluateEligibility({ nodeStatus: "conditional", override: null, ...base })).toEqual({
+expect(evaluateEligibility({ ...base, nodeStatus: "conditional", override: undefined })).toEqual({
   eligible: false,
   reasons: ["CONDITIONAL_REQUIRES_OVERRIDE"],
 });
 ```
 
-- [ ] **Step 2: Implement pure eligibility**
-
-Automatic eligibility is exactly:
+- [ ] **Step 2: Implement exact eligibility function**
 
 ```ts
-node.status === "active" &&
-capabilityExists &&
-skillLevel >= minimumSkillLevel &&
-nodeTypeAllowed &&
-productClassAllowed &&
-securityAllowed &&
-wardenAllowed &&
-!explicitlyBlocked &&
-capacityUnitSupported
+export function evaluateEligibility(i: EligibilityInput): EligibilityResult {
+  const reasons: string[] = [];
+  if (i.nodeStatus === "conditional" && !(i.override?.authorized && i.override.wardenDecisionId)) reasons.push("CONDITIONAL_REQUIRES_OVERRIDE");
+  if (!["active", "conditional"].includes(i.nodeStatus)) reasons.push("NODE_NOT_ASSIGNABLE");
+  if (!i.capabilityExists) reasons.push("CAPABILITY_MISSING");
+  if (i.skillLevel < i.minimumSkillLevel) reasons.push("SKILL_TOO_LOW");
+  if (!i.nodeTypeAllowed) reasons.push("NODE_TYPE_BLOCKED");
+  if (!i.productClassAllowed) reasons.push("PRODUCT_CLASS_BLOCKED");
+  if (!i.securityAllowed) reasons.push("SECURITY_BLOCKED");
+  if (!i.wardenAllowed) reasons.push("WARDEN_DENIED");
+  if (i.explicitlyBlocked) reasons.push("NODE_EXPLICITLY_BLOCKED");
+  if (!i.capacityUnitSupported) reasons.push("CAPACITY_UNIT_UNSUPPORTED");
+  return { eligible: reasons.length === 0, reasons };
+}
 ```
 
-Conditional nodes may return eligible only when `override.authorized === true` and `override.wardenDecisionId` is non-empty.
-
-- [ ] **Step 3: Implement routing score with missing-history redistribution**
-
-Use the base weights:
+- [ ] **Step 3: Implement exact routing weight behavior**
 
 ```ts
-const BASE_WEIGHTS = {
-  capability: 0.25,
-  capacity: 0.20,
-  quality: 0.15,
-  delivery: 0.15,
-  cost: 0.10,
-  governance: 0.10,
-  clientHistory: 0.05,
-} as const;
+const BASE = { capability: .25, capacity: .20, quality: .15, delivery: .15, cost: .10, governance: .10, clientHistory: .05 } as const;
+
+export function effectiveWeights(hasClientHistory: boolean) {
+  if (hasClientHistory) return BASE;
+  const scale = 1 / 0.95;
+  return {
+    capability: BASE.capability * scale,
+    capacity: BASE.capacity * scale,
+    quality: BASE.quality * scale,
+    delivery: BASE.delivery * scale,
+    cost: BASE.cost * scale,
+    governance: BASE.governance * scale,
+    clientHistory: 0,
+  };
+}
 ```
 
-If `clientHistory` is absent, divide each of the first six weights by `0.95` so they again sum to 1.0.
+`scoreRouteCandidate` normalizes all components to 0–100, stores the component breakdown, and computes the weighted sum.
 
-- [ ] **Step 4: Implement tie-breaking**
+- [ ] **Step 4: Implement deterministic tie-breaking**
 
-Sort candidates by final score rounded to two decimals, then governance score desc, first-pass yield desc, earliest finish asc, forecast cost asc, `production_node_id` lexical asc.
+```ts
+export function compareCandidates(a: ScoredCandidate, b: ScoredCandidate): number {
+  const ar = Math.round(a.finalScore * 100) / 100;
+  const br = Math.round(b.finalScore * 100) / 100;
+  return br - ar
+    || b.governanceScore - a.governanceScore
+    || b.firstPassYield - a.firstPassYield
+    || a.earliestFinish.getTime() - b.earliestFinish.getTime()
+    || a.forecastCost - b.forecastCost
+    || a.productionNodeId.localeCompare(b.productionNodeId);
+}
+```
 
-- [ ] **Step 5: Persist complete routing evidence**
+- [ ] **Step 5: Persist complete route evidence**
 
-The persisted routing decision includes all eligible candidates with component scores, all ineligible candidates with reasons, exact node-version/performance-snapshot IDs used, algorithm version `R0.4.0`, weight-profile ID, Warden decision reference, and selected node.
+One transaction inserts a `routing_decisions` row plus one `routing_candidates` row for every considered node, including ineligible reasons, selected node-version ID, performance-snapshot ID, weight-profile ID, algorithm version `R0.4.0`, Warden/River refs, and component scores.
 
-- [ ] **Step 6: Run unit/integration tests**
+- [ ] **Step 6: Run replay test and commit**
 
 ```bash
 npm run test:unit -- routing
 npm run test:integration -- routing
-```
-
-Expected: PASS with deterministic replay of the same fixture.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add lib/dws-production/domain/scoring.ts lib/dws-production/services/routing.ts tests/dws-production/routing.test.ts tests/dws-production/routing.integration.test.ts
+git add lib/dws-production/domain/scoring.ts lib/dws-production/services/routing.ts tests/dws-production/routing*
 git commit -m "feat: add deterministic DWS routing engine"
 ```
 
+Expected: repeated evaluation of the same fixture produces the same selected node and component scores.
+
 ---
 
-### Task 7: Implement transactional tentative holds, atomic commit, expiry, release, and idempotency
+### Task 6: Implement transactional capacity holds, atomic commit, expiry, release, and idempotency
 
 **Files:**
 - Create: `lib/dws-production/services/capacity.ts`
 - Create: `tests/dws-production/capacity.integration.test.ts`
 
 **Interfaces:**
-- Produces: `simulateCapacity`, `holdCapacity`, `commitReservationGroup`, `releaseReservationGroup`, `expireTentativeReservations`
+- `simulateCapacity()`
+- `holdCapacity()`
+- `commitReservationGroup()`
+- `releaseReservationGroup()`
+- `expireTentativeReservations()`
 
-- [ ] **Step 1: Write the concurrent overbooking test first**
+- [ ] **Step 1: Write concurrent overbooking test before code**
 
-Create one bucket with `8` allocatable engineering hours. Fire two concurrent hold requests for `6` hours against the same node/date. Assert exactly one succeeds and total active allocations never exceed `8`.
+Create one 8-hour bucket; issue two concurrent 6-hour holds:
 
 ```ts
 const results = await Promise.allSettled([
-  holdCapacity(db, request("idem-a", 6)),
-  holdCapacity(db, request("idem-b", 6)),
+  holdCapacity(request("idem-a", 6)),
+  holdCapacity(request("idem-b", 6)),
 ]);
-expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+expect(await activeReservedUnits(bucketKey)).toBeLessThanOrEqual(8);
 ```
 
-Expected initially: FAIL because `holdCapacity` is absent.
+- [ ] **Step 2: Implement canonical request hashing/idempotency helper**
 
-- [ ] **Step 2: Implement bucket locking and allocation checks**
+```ts
+import { createHash } from "node:crypto";
 
-Within one DB transaction:
+export function requestHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value, Object.keys(value as object).sort())).digest("hex");
+}
+```
 
-1. sort requested bucket keys lexically to prevent lock-order deadlocks;
-2. `SELECT ... FOR UPDATE` each `capacity_buckets` row;
-3. calculate active tentative/committed allocations;
-4. reject with `DWS_CAPACITY_CONFLICT` if any bucket would go negative;
-5. insert reservation group + allocations;
-6. insert one idempotency result record before commit;
-7. append `CAPACITY_RESERVED` event.
+Before a mutation, read `(tenant_id,idempotency_key)`: same hash returns stored response; different hash throws `DWS_IDEMPOTENCY_CONFLICT`.
 
-- [ ] **Step 3: Implement atomic tentative→committed conversion**
+- [ ] **Step 3: Implement row-locking hold transaction**
 
-Lock the reservation group and all allocation buckets. Reject expired/inactive groups. Update the group to `converted`, create a committed successor group referencing the authority, and transition every allocation as one transaction. If any row fails, rollback all changes.
+Sort bucket keys lexically, then in one tenant transaction:
 
-- [ ] **Step 4: Implement expiry/release**
+```ts
+for (const key of sortedKeys) {
+  const bucket = await lockCapacityBucket(tx, input.tenantId, key.productionNodeId, key.date, key.capacityUnit);
+  if (!bucket) throw new DwsError("DWS_CAPACITY_UNAVAILABLE", "capacity bucket missing");
+  const used = await sumActiveReservationsTx(tx, key);
+  const allocatable = Number(bucket.nominal_units) - Number(bucket.maintenance_units) - Number(bucket.leave_units) - used;
+  if (allocatable < key.reservedUnits) throw new DwsError("DWS_CAPACITY_CONFLICT", "requested hold exceeds available capacity", true);
+}
+await insertTentativeReservationGroupAndAllocations(tx, input);
+await appendProductionEventTx(tx, capacityReservedEvent(input));
+await saveIdempotentResponseTx(tx, input, response);
+```
 
-`expireTentativeReservations(now)` updates only active tentative groups with `expires_at <= now`, appends `CAPACITY_RESERVATION_EXPIRED`, and immediately restores availability through projection semantics.
+- [ ] **Step 4: Implement all-or-nothing tentative→committed conversion**
 
-- [ ] **Step 5: Verify idempotency conflict behavior**
+Lock the tentative group and the same sorted capacity buckets. Validate `state='active'`, `reservation_type='tentative'`, `expires_at > now()`, and non-empty `authorityRef`. Mark predecessor `converted`, insert one committed successor group with `predecessor_group_id`, copy all allocations, append event, and save idempotent response in the same transaction. Any failure rolls the full transaction back.
 
-Same key + same canonical request hash returns prior result. Same key + different request hash throws `DWS_IDEMPOTENCY_CONFLICT`.
+- [ ] **Step 5: Implement expiry/release**
 
-- [ ] **Step 6: Run the capacity suite repeatedly**
+`expireTentativeReservations(now)` updates only active tentative groups with `expires_at <= now`, appends `CAPACITY_RESERVATION_EXPIRED`, and relies on active-state filtering to restore availability. `releaseReservationGroup()` changes active group to `released` and is idempotent.
+
+- [ ] **Step 6: Stress the concurrency invariant and commit**
 
 ```bash
 for i in 1 2 3 4 5; do npm run test:integration -- capacity || exit 1; done
-```
-
-Expected: every run passes; no overbooking.
-
-- [ ] **Step 7: Commit**
-
-```bash
 git add lib/dws-production/services/capacity.ts tests/dws-production/capacity.integration.test.ts
 git commit -m "feat: add transactional DWS capacity reservations"
 ```
 
 ---
 
-### Task 8: Implement assignments, append-only production events, QA inspections, NCR, rework, and acceptance gates
+### Task 7: Implement assignments, append-only execution events, QA/NCR gates, and performance intelligence
 
 **Files:**
 - Create: `lib/dws-production/services/execution.ts`
 - Create: `lib/dws-production/services/quality.ts`
-- Create: `tests/dws-production/quality.integration.test.ts`
-
-**Interfaces:**
-- Produces: `assignWorkPackage`, `appendProductionEvent`, `projectWorkPackageState`, `startInspection`, `recordInspectionResult`, `openNonconformance`, `requestRework`, `closeNonconformance`, `acceptWorkPackage`
-
-- [ ] **Step 1: Write the full QA failure/rework test before implementation**
-
-The fixture must execute:
-
-```text
-WORK_ASSIGNED
-→ WORK_STARTED
-→ BUILD_SUBMITTED
-→ QA_STARTED
-→ QA_FAILED
-→ NONCONFORMANCE_OPENED
-→ REWORK_REQUESTED
-→ REWORK_SUBMITTED
-→ QA_STARTED
-→ QA_PASSED
-→ WORK_COMPLETED
-```
-
-Assert acceptance before QA pass throws `DWS_QA_FAILED`, and acceptance with an open blocking NCR throws `DWS_NONCONFORMANCE_OPEN`.
-
-- [ ] **Step 2: Implement append-only events**
-
-`appendProductionEvent` inserts exactly one event per `(tenant_id, idempotency_key)`, validates the event type against `event_type_registry`, never updates/deletes prior event rows, and records `occurred_at` separately from `recorded_at`.
-
-- [ ] **Step 3: Implement event-derived state projection**
-
-`projectWorkPackageState(events)` folds the ordered event stream through the work-package transition rules. Add a test proving the resulting state equals the materialized work-package state after each command.
-
-- [ ] **Step 4: Implement assignment validity**
-
-Assignments require a persisted routing decision or a Warden-authorized manual override, a non-expired committed reservation, and the exact `production_node_version_id` selected at decision time.
-
-- [ ] **Step 5: Implement QA/NCR gates**
-
-`recordInspectionResult(..., "fail")` creates/permits NCR creation and moves work to rework/QA-hold semantics. `acceptWorkPackage` verifies latest required inspection is pass/pass_with_exception and no blocking NCR remains open unless that NCR contains a Warden-authorized accepted-exception reference.
-
-- [ ] **Step 6: Run integration tests**
-
-```bash
-npm run test:integration -- quality
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add lib/dws-production/services/execution.ts lib/dws-production/services/quality.ts tests/dws-production/quality.integration.test.ts
-git commit -m "feat: add DWS execution and QA lifecycle"
-```
-
----
-
-### Task 9: Implement production metrics, node-performance snapshots, bottleneck output, and schedule confidence
-
-**Files:**
 - Create: `lib/dws-production/domain/metrics.ts`
 - Create: `lib/dws-production/services/performance.ts`
 - Modify: `lib/dws-production/domain/scheduling.ts`
+- Create: `tests/dws-production/quality.integration.test.ts`
 - Create: `tests/dws-production/performance.test.ts`
 
 **Interfaces:**
-- Produces: `calculateFirstPassYield`, `calculateOnTimeRate`, `calculateReworkRate`, `calculateDefectEscapeRate`, `calculateScheduleConfidence`, `createPerformanceSnapshot`
+- `assignWorkPackage()`
+- `appendProductionEvent()`
+- `projectWorkPackageState()`
+- `startInspection()` / `recordInspectionResult()`
+- `openNonconformance()` / `requestRework()` / `closeNonconformance()`
+- `acceptWorkPackage()`
+- `calculateScheduleConfidence()`
+- `createPerformanceSnapshot()`
 
-- [ ] **Step 1: Write metric tests with exact fixtures**
+- [ ] **Step 1: Write the exact QA failure→rework→pass test**
 
-For 10 first inspections with 8 first-pass acceptances, assert FPY = `0.8`. For 10 completed packages with 9 on time, assert `0.9`. For schedule confidence components `100, 80, 100, 60, 80`, assert:
+Exercise:
+
+```text
+WORK_ASSIGNED → WORK_STARTED → BUILD_SUBMITTED → QA_STARTED → QA_FAILED
+→ NONCONFORMANCE_OPENED → REWORK_REQUESTED → REWORK_SUBMITTED
+→ QA_STARTED → QA_PASSED → WORK_COMPLETED
+```
+
+Assert `acceptWorkPackage()` before QA pass throws `DWS_QA_FAILED`; with a blocking open NCR it throws `DWS_NONCONFORMANCE_OPEN`.
+
+- [ ] **Step 2: Implement append-only event and replay projection**
+
+```ts
+export function projectWorkPackageState(events: ProductionEvent[]): WorkPackageState {
+  let state: WorkPackageState = "released";
+  for (const e of [...events].sort(byOccurredRecordedAndId)) {
+    const next = WORK_EVENT_TO_STATE[e.eventType];
+    if (!next) continue;
+    assertWorkPackageTransition(state, next);
+    state = next;
+  }
+  return state;
+}
+```
+
+`appendProductionEvent()` only inserts; the database trigger provides a second line of defense against update/delete.
+
+- [ ] **Step 3: Enforce assignment prerequisites**
+
+`assignWorkPackage()` verifies: committed active reservation exists for the selected node/work package; routing decision selected the same immutable node version OR a Warden-authorized manual override exists; dependencies are accepted; node is still assignable under the recorded decision context. Persist assignment and `WORK_ASSIGNED` together.
+
+- [ ] **Step 4: Implement QA/NCR acceptance gate**
+
+`acceptWorkPackage()` loads the latest required inspection and all open/rework NCRs. It permits completion only if result is `pass`, or `pass_with_exception` with evidence/authority, and every blocking NCR is `closed` or `accepted_exception` with `warden_exception_decision_id`.
+
+- [ ] **Step 5: Implement exact metric formulas**
+
+`metrics.ts`:
+
+```ts
+export const ratio = (n: number, d: number): number | null => d === 0 ? null : n / d;
+export const calculateFirstPassYield = (acceptedFirstPass: number, firstInspections: number) => ratio(acceptedFirstPass, firstInspections);
+export const calculateOnTimeRate = (onTime: number, completed: number) => ratio(onTime, completed);
+export const calculateReworkRate = (reworked: number, submitted: number) => ratio(reworked, submitted);
+export const calculateDefectEscapeRate = (postQaDefects: number, accepted: number) => ratio(postQaDefects, accepted);
+
+export function calculateScheduleConfidence(i: {
+  capacityCoverage: number;
+  effortModelCoverage: number;
+  dependencyCompleteness: number;
+  performanceHistoryCoverage: number;
+  qaDurationCoverage: number;
+}) {
+  return i.capacityCoverage * .25
+    + i.effortModelCoverage * .25
+    + i.dependencyCompleteness * .20
+    + i.performanceHistoryCoverage * .15
+    + i.qaDurationCoverage * .15;
+}
+```
+
+Exact test:
 
 ```ts
 expect(calculateScheduleConfidence({
@@ -852,113 +1350,128 @@ expect(calculateScheduleConfidence({
   dependencyCompleteness: 100,
   performanceHistoryCoverage: 60,
   qaDurationCoverage: 80,
-})).toBe(85);
+})).toBe(86);
 ```
 
-because `25 + 20 + 20 + 9 + 12 = 86`; use the mathematically correct expected value `86` in the test.
+- [ ] **Step 6: Implement immutable performance snapshots and bottleneck report**
 
-- [ ] **Step 2: Implement pure metric functions**
+At LMO completion, aggregate the configured reporting period and insert a new snapshot with `algorithm_version='R0.4.0'`; never update prior snapshots. Extend scheduling output:
 
-Guard zero-denominator metrics by returning `null`, not zero, so absence of history is distinguishable from bad performance.
+```ts
+export type BottleneckReport = {
+  capabilityCode: string;
+  productionNodeIds: string[];
+  affectedWorkPackageIds: string[];
+  affectedCapacityDates: string[];
+  delayHours: number;
+};
+```
 
-- [ ] **Step 3: Implement versioned performance snapshots**
+Select the constrained capability/node group on the critical path with highest utilized allocatable capacity; tie-break by capability code lexical order.
 
-At LMO completion, aggregate the configured period and persist a new immutable snapshot with `algorithm_version = 'R0.4.0'` and sample size. Routing never rewrites historical decisions when a newer snapshot appears.
-
-- [ ] **Step 4: Add bottleneck output to scheduling**
-
-Return the capability/node group with highest constrained utilization on the critical path, affected work-package IDs, affected capacity dates, and total completion delay attributable to the constraint.
-
-- [ ] **Step 5: Run tests**
+- [ ] **Step 7: Run and commit**
 
 ```bash
 npm run test:unit -- performance scheduling
-```
-
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add lib/dws-production/domain/metrics.ts lib/dws-production/services/performance.ts lib/dws-production/domain/scheduling.ts tests/dws-production/performance.test.ts
-git commit -m "feat: add DWS production performance intelligence"
+npm run test:integration -- quality
+git add lib/dws-production/services/execution.ts lib/dws-production/services/quality.ts lib/dws-production/domain/metrics.ts lib/dws-production/services/performance.ts lib/dws-production/domain/scheduling.ts tests/dws-production
+git commit -m "feat: add DWS execution quality and performance intelligence"
 ```
 
 ---
 
-### Task 10: Add secure internal Next.js API adapters without coupling domain logic to HTTP
+### Task 8: Add governed internal HTTP adapters and health surface
 
 **Files:**
 - Create: `lib/dws-production/http/auth.ts`
 - Create: `lib/dws-production/http/response.ts`
-- Create route files under `app/api/dws-production/**` listed in File Structure
+- Create all `app/api/dws-production/**/route.ts` files from Target File Map
 - Create: `tests/dws-production/http.test.ts`
 
 **Interfaces:**
-- Produces: internal REST command surface for R0.2/R0.3/operator consoles
-- Authentication: `Authorization: Bearer $DWS_INTERNAL_API_TOKEN`, `x-dws-tenant-id`, `x-dws-principal-id`; governed operations also accept/require `x-dws-warden-decision-id` according to service command.
+- Bearer auth: `DWS_INTERNAL_API_TOKEN`
+- Context headers: `x-dws-tenant-id`, `x-dws-principal-id`, optional `x-dws-warden-decision-id`
 
-- [ ] **Step 1: Write failing auth tests**
+- [ ] **Step 1: Write auth/error mapping tests**
 
-Test 401 for missing/incorrect bearer token, 400 for missing tenant/principal context, and success context parsing for valid headers.
+Test missing/incorrect token → 401, missing tenant/principal → 400, Warden-required command without decision ID → 403, `DWS_CAPACITY_CONFLICT` → 409, `DWS_NO_ELIGIBLE_ROUTE` → 422.
 
-- [ ] **Step 2: Implement constant-time bearer comparison**
-
-Use Node `crypto.timingSafeEqual` after length equality. Never log the token.
+- [ ] **Step 2: Implement constant-time internal authentication**
 
 ```ts
-export type DwsRequestContext = {
-  tenantId: string;
-  principalId: string;
-  wardenDecisionId?: string;
-};
-```
+import { timingSafeEqual } from "node:crypto";
 
-- [ ] **Step 3: Implement HTTP error mapping**
+export type DwsRequestContext = { tenantId: string; principalId: string; wardenDecisionId?: string };
 
-Map:
-
-- validation errors → 400;
-- governance/authorization → 401/403;
-- illegal transition/idempotency/capacity conflict → 409;
-- unavailable capacity/no eligible route → 422;
-- unknown errors → 500 with correlation ID and no secret internals.
-
-- [ ] **Step 4: Add thin routes**
-
-Each route must do only:
-
-```ts
-const context = authenticateDwsRequest(request);
-const body = Schema.parse(await request.json());
-const result = await service(body, context);
-return Response.json(result, { status: 200 });
-```
-
-Do not put routing weights, capacity arithmetic, SQL, or QA rules in route files.
-
-- [ ] **Step 5: Add a read-only health route**
-
-`GET /api/dws-production/health` returns only:
-
-```json
-{
-  "service": "DWS-PRODUCTION-R0.4",
-  "version": "R0.4.0",
-  "database": "reachable"
+export function authenticateDwsRequest(request: Request): DwsRequestContext {
+  const expected = process.env.DWS_INTERNAL_API_TOKEN;
+  const actual = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!expected || !actual) throw new HttpAuthError(401, "missing credentials");
+  const a = Buffer.from(actual); const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) throw new HttpAuthError(401, "invalid credentials");
+  const tenantId = request.headers.get("x-dws-tenant-id");
+  const principalId = request.headers.get("x-dws-principal-id");
+  if (!tenantId || !principalId) throw new HttpAuthError(400, "missing DWS request context");
+  return { tenantId, principalId, wardenDecisionId: request.headers.get("x-dws-warden-decision-id") ?? undefined };
 }
 ```
 
-and returns 503 when the database probe fails.
+- [ ] **Step 3: Implement common error response mapper**
 
-- [ ] **Step 6: Verify routes compile and existing MCP self-test remains intact**
+```ts
+export function errorResponse(error: unknown): Response {
+  if (error instanceof HttpAuthError) return Response.json({ code: "DWS_HTTP_AUTH", message: error.message }, { status: error.status });
+  if (error instanceof DwsError) {
+    const status = error.code === "DWS_GOVERNANCE_DENIED" ? 403
+      : ["DWS_CAPACITY_CONFLICT","DWS_ILLEGAL_STATE_TRANSITION","DWS_IDEMPOTENCY_CONFLICT"].includes(error.code) ? 409
+      : ["DWS_CAPACITY_UNAVAILABLE","DWS_NO_ELIGIBLE_ROUTE","DWS_QA_FAILED","DWS_NONCONFORMANCE_OPEN"].includes(error.code) ? 422
+      : 400;
+    return Response.json({ code: error.code, message: error.message, retryable: error.retryable }, { status });
+  }
+  const correlationId = crypto.randomUUID();
+  console.error("DWS internal error", { correlationId, error });
+  return Response.json({ code: "DWS_INTERNAL", correlationId }, { status: 500 });
+}
+```
+
+- [ ] **Step 4: Implement thin route pattern**
+
+Every mutation route follows:
+
+```ts
+export async function POST(request: Request) {
+  try {
+    const context = authenticateDwsRequest(request);
+    const body = CommandSchema.parse(await request.json());
+    if (body.tenantId !== context.tenantId) throw new DwsError("DWS_GOVERNANCE_DENIED", "tenant mismatch");
+    const result = await service(body, context);
+    return Response.json(result);
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+```
+
+Map routes exactly to spec service operations: simulate/hold/commit capacity, create/release LMO, append execution event, create/record QA inspection, create/update NCR, register nodes.
+
+- [ ] **Step 5: Add read-only health route**
+
+`GET /api/dws-production/health` runs `select 1`; success:
+
+```json
+{"service":"DWS-PRODUCTION-R0.4","version":"R0.4.0","database":"reachable"}
+```
+
+DB failure returns 503 with `database:"unreachable"` and no connection detail.
+
+- [ ] **Step 6: Verify HTTP tests and build**
 
 ```bash
-npm run test -- http
+npm test -- http
 npm run build
 ```
 
-Expected: PASS.
+Expected: PASS; `/api/mcp` files are unchanged.
 
 - [ ] **Step 7: Commit**
 
@@ -969,7 +1482,7 @@ git commit -m "feat: expose governed DWS production API"
 
 ---
 
-### Task 11: Prove the complete R0.4 qualification flow and add dedicated CI
+### Task 9: Prove R0.4 end-to-end qualification and CI invariants
 
 **Files:**
 - Create: `tests/dws-production/qualification.integration.test.ts`
@@ -977,38 +1490,49 @@ git commit -m "feat: expose governed DWS production API"
 - Create: `docs/dws-production/R0.4-QUALIFICATION.md`
 
 **Interfaces:**
-- Consumes all prior R0.4 services
-- Produces one deterministic qualification receipt fixture and CI gate
+- Consumes all prior domain/services
+- Produces one deterministic qualification fixture and CI gate
 
-- [ ] **Step 1: Write the end-to-end qualification test**
+- [ ] **Step 1: Write exact qualification fixture**
 
-The test must perform, using stable fixture IDs:
+The integration test must execute these stable fixtures:
 
 ```text
-1. Register PN-DWS-000001 internal and PN-DWS-000002 contractor.
-2. Give both API_INTEGRATION capability; give contractor lower cost but weaker quality.
-3. Create five daily capacity buckets for both nodes.
-4. Insert one manufacturing recipe and approved configuration fixture.
-5. Decompose to LMO-DWS-000001 and work-package DAG.
-6. Simulate capacity and prove both nodes are eligible.
-7. Route using R0.4.0 weights and assert the exact selected node from fixture scores.
-8. Create tentative capacity hold.
-9. Convert the reservation group atomically with authority `WDN-TEST-000001`.
-10. Release/assign work.
-11. Append start + submit events.
-12. Fail first QA inspection and open NCR-DWS-000001.
-13. Prove completion is blocked.
-14. Submit rework, pass second QA inspection, close NCR.
-15. Complete work and LMO.
-16. Create a node-performance snapshot.
-17. Replay event history and assert reconstructed state = persisted state.
-18. Attempt two conflicting concurrent reservations and assert no overbooking.
-19. Re-run the original routing fixture and prove its persisted historical decision is unchanged by the new performance snapshot.
+PN-DWS-000001  internal API integration node
+PN-DWS-000002  contractor API integration node
+LMO-DWS-000001
+NCR-DWS-000001
+WDN-TEST-000001
 ```
 
-- [ ] **Step 2: Add PostgreSQL 16 GitHub Actions service**
+Test sequence:
 
-Create `.github/workflows/dws-production.yml` with:
+```text
+1 Register both nodes and immutable versions.
+2 Give both API_INTEGRATION capability; contractor has lower cost but weaker quality.
+3 Seed five daily capacity buckets.
+4 Seed one manufacturing recipe and exact approved configuration version.
+5 Decompose to LMO-DWS-000001 and DAG.
+6 Simulate capacity and prove both candidates pass hard eligibility.
+7 Persist R0.4.0 routing decision and assert exact selected node from fixture scores.
+8 Create tentative hold.
+9 Convert reservation group atomically using WDN-TEST-000001.
+10 Release/assign work to selected immutable node version.
+11 Append WORK_STARTED and BUILD_SUBMITTED.
+12 Fail QA round 1; open NCR-DWS-000001.
+13 Prove acceptance/completion is blocked.
+14 Request/submit rework; pass QA round 2; close NCR.
+15 Accept work; complete LMO.
+16 Create immutable node-performance snapshot.
+17 Replay work-package event history and assert reconstructed state equals persisted state.
+18 Race two conflicting reservations against one capacity bucket and prove no overbooking.
+19 Re-run the original fixture inputs and prove the persisted historical routing record did not change after the new performance snapshot.
+20 Verify a different tenant cannot read the LMO through tenant-scoped transaction/RLS.
+```
+
+- [ ] **Step 2: Add dedicated PostgreSQL CI workflow**
+
+Create `.github/workflows/dws-production.yml`:
 
 ```yaml
 name: DWS Production R0.4 validation
@@ -1065,20 +1589,32 @@ jobs:
       - run: npm run build
 ```
 
-Keep the existing `genesis-seed-mcp.yml` workflow unchanged.
+Do not modify `.github/workflows/genesis-seed-mcp.yml`.
 
-- [ ] **Step 3: Document the qualification receipt**
+- [ ] **Step 3: Write qualification receipt template with actual fixture fields**
 
-`R0.4-QUALIFICATION.md` records the fixture IDs, commands run, expected invariants, and CI workflow name. It explicitly lists:
+`docs/dws-production/R0.4-QUALIFICATION.md` must contain:
 
-- no-overbooking result;
-- deterministic routing decision ID;
-- QA fail→NCR→rework→pass sequence;
-- event replay equality;
-- performance snapshot version;
-- build/test commands.
+```markdown
+# DWS Production R0.4 Qualification
 
-- [ ] **Step 4: Run the full local qualification**
+- Algorithm version: R0.4.0
+- Internal node: PN-DWS-000001
+- Contractor node: PN-DWS-000002
+- Qualification LMO: LMO-DWS-000001
+- Qualification NCR: NCR-DWS-000001
+- Warden test decision: WDN-TEST-000001
+- No-overbooking invariant: PASS/FAIL from automated test
+- Deterministic routing replay: PASS/FAIL
+- Event replay equality: PASS/FAIL
+- QA fail → NCR → rework → pass: PASS/FAIL
+- Tenant isolation: PASS/FAIL
+- Build: PASS/FAIL
+```
+
+Populate PASS only from test/build results produced during execution.
+
+- [ ] **Step 4: Run full local qualification**
 
 ```bash
 docker compose -f infra/dws-production/docker-compose.yml up -d
@@ -1089,7 +1625,7 @@ npm test
 npm run build
 ```
 
-Expected: all DWS tests pass and the Next production build succeeds.
+Expected: all tests pass, including concurrency/RLS/event replay, and Next.js production build succeeds.
 
 - [ ] **Step 5: Commit**
 
@@ -1100,42 +1636,39 @@ git commit -m "test: qualify DWS production intelligence R0.4"
 
 ---
 
-## Execution Order and Review Gates
-
-Execute strictly in this order:
+## Execution Order
 
 ```text
-1 Tooling
+1 Harness
 → 2 Domain contracts
-→ 3 Schema
-→ 4 Node/capacity registry
-→ 5 LMO decomposition/scheduling
-→ 6 Routing
-→ 7 Reservation concurrency
-→ 8 Execution + QA
-→ 9 Performance intelligence
-→ 10 HTTP adapters
-→ 11 Qualification + CI
+→ 3 PostgreSQL/RLS/ledger
+→ 4 Node registry + LMO scheduling
+→ 5 Routing
+→ 6 Capacity concurrency
+→ 7 Execution + QA + performance
+→ 8 HTTP adapters
+→ 9 Qualification + CI
 ```
 
-A reviewer may reject any task independently. Do not begin a later task while an earlier task has failing tests or unresolved review findings.
+Do not begin a later task while an earlier task has failing tests or unresolved review findings.
 
 ## Definition of Done
 
-R0.4 implementation is complete only when all of the following are evidenced by automated tests:
+R0.4.0 is complete only when automated evidence proves:
 
-- one internal and one contracted production node with immutable versions;
-- deterministic product/configuration decomposition to an LMO DAG;
-- hard eligibility exclusion with persisted reasons;
-- reproducible routing with versioned weights and exact tie-breaking;
-- tentative capacity hold, expiry/release, and atomic commitment;
-- concurrent reservation attempts cannot overbook a bucket;
-- assignment binds the selected node version and committed reservation;
-- event ledger replay reconstructs the same effective state;
-- QA failure creates a blocking path through NCR and rework;
+- one internal and one contracted Production Node with immutable versions;
+- deterministic recipe/configuration decomposition to an LMO DAG;
+- hard eligibility exclusion with persisted reasons and conditional-node Warden override path;
+- reproducible route scoring, missing-history behavior, and tie-breaking;
+- tentative hold, expiry/release, and atomic committed-capacity conversion;
+- concurrent holds cannot overbook allocatable capacity;
+- assignments bind the recorded immutable node version and committed reservation;
+- append-only event replay reconstructs effective state;
+- QA failure opens a blocking path through NCR/rework;
 - completion cannot bypass required QA/NCR gates;
-- completed work produces an immutable performance snapshot;
-- bottleneck/critical-path and schedule-confidence outputs are reproducible;
-- all mutation paths are idempotent and tenant-scoped;
-- existing Genesis Seed MCP build/self-test surface remains unaffected;
-- the dedicated GitHub Actions workflow passes PostgreSQL integration tests and `npm run build`.
+- completed work can create an immutable R0.4.0 performance snapshot;
+- critical-path, bottleneck, and schedule-confidence outputs are deterministic;
+- every material mutation is idempotent and tenant scoped;
+- cross-tenant access is blocked by transaction context/RLS;
+- existing Genesis Seed MCP surface remains unaffected;
+- dedicated PostgreSQL CI and `npm run build` pass.
