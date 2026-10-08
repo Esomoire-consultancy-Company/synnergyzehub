@@ -1,5 +1,7 @@
 import os
 import unittest
+from unittest.mock import Mock
+from uuid import UUID
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -31,6 +33,47 @@ class GrowMyTradeContractTests(unittest.TestCase):
         first = gmt._payload_hash({"b": 2, "a": 1})
         second = gmt._payload_hash({"a": 1, "b": 2})
         self.assertEqual(first, second)
+
+    def test_idempotency_key_cannot_be_reused_for_another_case(self):
+        cur = Mock()
+        cur.fetchone.return_value = {
+            "request_hash": "same-request",
+            "case_id": UUID("00000000-0000-0000-0000-000000000001"),
+        }
+
+        with self.assertRaises(HTTPException) as ctx:
+            gmt._check_idempotency(
+                cur,
+                workspace_id="workspace",
+                case_id="00000000-0000-0000-0000-000000000002",
+                scope="business-discovery",
+                idempotency_key="request-key",
+                request_hash="same-request",
+            )
+
+        self.assertEqual(ctx.exception.status_code, 409)
+        cur.execute.assert_called_once()
+
+    def test_idempotency_replay_matches_uuid_formatting(self):
+        cur = Mock()
+        cur.fetchone.side_effect = [
+            {
+                "request_hash": "same-request",
+                "case_id": UUID("00000000-0000-0000-0000-000000000001"),
+            },
+            {"exists": 1},
+        ]
+
+        replayed = gmt._check_idempotency(
+            cur,
+            workspace_id="workspace",
+            case_id="00000000000000000000000000000001",
+            scope="business-discovery",
+            idempotency_key="request-key",
+            request_hash="same-request",
+        )
+
+        self.assertTrue(replayed)
 
     def test_independent_business_rights_are_preserved(self):
         self.assertTrue(gmt.RIGHTS_CONTEXT["business_ownership_retained"])

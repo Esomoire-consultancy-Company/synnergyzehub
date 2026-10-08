@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -107,14 +108,23 @@ def _require_workspace_membership(cur, workspace_id: str, actor_user_id: str):
         )
 
 
-def _load_case(cur, case_id: str, principal: str, actor_user_id: str):
+def _load_case(
+    cur,
+    case_id: str,
+    principal: str,
+    actor_user_id: str,
+    *,
+    lock_for_update: bool = True,
+):
+    lock_clause = "FOR UPDATE" if lock_for_update else ""
     cur.execute(
-        """
+        f"""
         SELECT *
           FROM gmt.onboarding_cases
          WHERE id = %s
            AND digitalme_principal = %s
            AND actor_user_id = %s
+         {lock_clause}
         """,
         (case_id, principal, actor_user_id),
     )
@@ -144,7 +154,7 @@ def _check_idempotency(
 ) -> bool:
     cur.execute(
         """
-        SELECT request_hash
+        SELECT request_hash, case_id
           FROM gmt.idempotency_records
          WHERE workspace_id = %s
            AND scope = %s
@@ -155,6 +165,11 @@ def _check_idempotency(
     record = cur.fetchone()
     if not record:
         return False
+    if UUID(str(record["case_id"])) != UUID(case_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key was already used for a different onboarding case.",
+        )
     if record["request_hash"] != request_hash:
         raise HTTPException(
             status_code=409,
@@ -675,4 +690,10 @@ def get_onboarding_case(
     )
     with get_conn() as conn:
         with conn.cursor() as cur:
-            return _load_case(cur, case_id, principal, actor_user_id)
+            return _load_case(
+                cur,
+                case_id,
+                principal,
+                actor_user_id,
+                lock_for_update=False,
+            )
