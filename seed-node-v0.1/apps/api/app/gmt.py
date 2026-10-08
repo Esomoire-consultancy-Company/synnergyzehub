@@ -1,7 +1,9 @@
 import hashlib
+import hmac
 import json
 import os
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -64,10 +66,18 @@ def _payload_hash(value: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _normalize_uuid(value: str, field: str) -> str:
+    try:
+        return str(UUID(value))
+    except (AttributeError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"{field} must be a valid UUID.")
+
+
 def _require_trusted_context(
     principal: str | None,
     verification_ref: str | None,
     actor_user_id: str | None,
+    assertion: str | None = None,
 ) -> tuple[str, str, str]:
     # R0.1 does not implement an identity-verification engine.
     # It accepts identity only from a trusted upstream VSR/DigitalMe ingress and
@@ -85,10 +95,32 @@ def _require_trusted_context(
                 "workspace actor user are required."
             ),
         )
+    actor_user_id = _normalize_uuid(actor_user_id, "actor_user_id")
+    secret = os.getenv("DIGITALME_TRUSTED_INGRESS_SECRET")
+    if not secret or len(secret.encode("utf-8")) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail="DigitalMe trusted ingress requires a secret of at least 32 bytes.",
+        )
+    assertion_payload = json.dumps(
+        [principal, verification_ref, actor_user_id], separators=(",", ":")
+    ).encode("utf-8")
+    expected_assertion = hmac.new(
+        secret.encode("utf-8"), assertion_payload, hashlib.sha256
+    ).hexdigest()
+    if not assertion or not hmac.compare_digest(
+        assertion.encode("utf-8"), expected_assertion.encode("ascii")
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="DigitalMe trusted ingress assertion is invalid.",
+        )
     return principal, verification_ref, actor_user_id
 
 
 def _require_workspace_membership(cur, workspace_id: str, actor_user_id: str):
+    workspace_id = _normalize_uuid(workspace_id, "workspace_id")
+    actor_user_id = _normalize_uuid(actor_user_id, "actor_user_id")
     cur.execute(
         """
         SELECT 1
@@ -107,14 +139,20 @@ def _require_workspace_membership(cur, workspace_id: str, actor_user_id: str):
         )
 
 
-def _load_case(cur, case_id: str, principal: str, actor_user_id: str):
+def _load_case(
+    cur, case_id: str, principal: str, actor_user_id: str, *, for_update: bool = False
+):
+    case_id = _normalize_uuid(case_id, "case_id")
+    actor_user_id = _normalize_uuid(actor_user_id, "actor_user_id")
+    lock_clause = "FOR UPDATE" if for_update else ""
     cur.execute(
-        """
+        f"""
         SELECT *
           FROM gmt.onboarding_cases
          WHERE id = %s
            AND digitalme_principal = %s
            AND actor_user_id = %s
+         {lock_clause}
         """,
         (case_id, principal, actor_user_id),
     )
@@ -144,7 +182,7 @@ def _check_idempotency(
 ) -> bool:
     cur.execute(
         """
-        SELECT request_hash
+        SELECT case_id, request_hash
           FROM gmt.idempotency_records
          WHERE workspace_id = %s
            AND scope = %s
@@ -155,18 +193,24 @@ def _check_idempotency(
     record = cur.fetchone()
     if not record:
         return False
+    if str(record["case_id"]) != case_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key belongs to a different onboarding case.",
+        )
     if record["request_hash"] != request_hash:
         raise HTTPException(
             status_code=409,
             detail="Idempotency key was already used with a different request.",
         )
-    cur.execute(
-        "SELECT 1 FROM gmt.onboarding_cases WHERE id = %s AND workspace_id = %s",
-        (case_id, workspace_id),
-    )
-    if not cur.fetchone():
-        raise HTTPException(status_code=409, detail="Idempotency record is inconsistent.")
     return True
+
+
+def _lock_idempotency_key(cur, workspace_id: str, scope: str, idempotency_key: str):
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))",
+        (workspace_id, f"{scope}:{idempotency_key}"),
+    )
 
 
 def _record_idempotency(
@@ -248,6 +292,7 @@ def _emit_river_event(
           FALSE,'not_applicable','APPLIED',NOW(),%s::jsonb
         )
         ON CONFLICT (workspace_id, source_system, idempotency_key)
+          WHERE idempotency_key IS NOT NULL
         DO NOTHING
         """,
         (
@@ -293,12 +338,15 @@ def create_onboarding_case(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_assertion: str | None = Header(None, alias="X-DigitalMe-Assertion"),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_assertion,
     )
+    workspace_id = _normalize_uuid(payload.workspace_id, "workspace_id")
     if not payload.rights_acknowledged:
         raise HTTPException(
             status_code=400,
@@ -307,7 +355,7 @@ def create_onboarding_case(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            _require_workspace_membership(cur, payload.workspace_id, actor_user_id)
+            _require_workspace_membership(cur, workspace_id, actor_user_id)
 
             cur.execute(
                 """
@@ -316,7 +364,7 @@ def create_onboarding_case(
                  WHERE workspace_id = %s
                    AND create_idempotency_key = %s
                 """,
-                (payload.workspace_id, x_idempotency_key),
+                (workspace_id, x_idempotency_key),
             )
             existing = cur.fetchone()
             if existing:
@@ -345,10 +393,11 @@ def create_onboarding_case(
                 ) VALUES (
                   %s,%s,%s,%s,'IDENTITY_VERIFIED',%s,%s::jsonb,NOW(),%s
                 )
+                ON CONFLICT (workspace_id, create_idempotency_key) DO NOTHING
                 RETURNING *
                 """,
                 (
-                    payload.workspace_id,
+                    workspace_id,
                     actor_user_id,
                     principal,
                     verification_ref,
@@ -358,10 +407,35 @@ def create_onboarding_case(
                 ),
             )
             case = cur.fetchone()
+            if case is None:
+                cur.execute(
+                    """
+                    SELECT *
+                      FROM gmt.onboarding_cases
+                     WHERE workspace_id = %s
+                       AND create_idempotency_key = %s
+                    """,
+                    (workspace_id, x_idempotency_key),
+                )
+                case = cur.fetchone()
+                if not case:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Unable to resolve the winning onboarding case.",
+                    )
+                if (
+                    case["digitalme_principal"] != principal
+                    or str(case["actor_user_id"]) != actor_user_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency key belongs to a different verified actor.",
+                    )
+                return case
 
             _emit_river_event(
                 cur,
-                workspace_id=payload.workspace_id,
+                workspace_id=workspace_id,
                 actor_user_id=actor_user_id,
                 principal=principal,
                 object_id=str(case["id"]),
@@ -390,12 +464,15 @@ def submit_discovery(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_assertion: str | None = Header(None, alias="X-DigitalMe-Assertion"),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_assertion,
     )
+    case_id = _normalize_uuid(case_id, "case_id")
     request_hash = _payload_hash(payload.model_dump())
 
     business_declaration = {
@@ -416,7 +493,10 @@ def submit_discovery(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            case = _load_case(cur, case_id, principal, actor_user_id)
+            case = _load_case(cur, case_id, principal, actor_user_id, for_update=True)
+            _lock_idempotency_key(
+                cur, str(case["workspace_id"]), "business-discovery", x_idempotency_key
+            )
             if _check_idempotency(
                 cur,
                 workspace_id=str(case["workspace_id"]),
@@ -490,12 +570,15 @@ def record_plan(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_assertion: str | None = Header(None, alias="X-DigitalMe-Assertion"),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_assertion,
     )
+    case_id = _normalize_uuid(case_id, "case_id")
     request_hash = _payload_hash(payload.model_dump())
 
     plan = {
@@ -511,7 +594,10 @@ def record_plan(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            case = _load_case(cur, case_id, principal, actor_user_id)
+            case = _load_case(cur, case_id, principal, actor_user_id, for_update=True)
+            _lock_idempotency_key(
+                cur, str(case["workspace_id"]), "business-plan", x_idempotency_key
+            )
             if _check_idempotency(
                 cur,
                 workspace_id=str(case["workspace_id"]),
@@ -574,17 +660,23 @@ def participant_approval(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_assertion: str | None = Header(None, alias="X-DigitalMe-Assertion"),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_assertion,
     )
+    case_id = _normalize_uuid(case_id, "case_id")
     request_hash = _payload_hash(payload.model_dump())
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            case = _load_case(cur, case_id, principal, actor_user_id)
+            case = _load_case(cur, case_id, principal, actor_user_id, for_update=True)
+            _lock_idempotency_key(
+                cur, str(case["workspace_id"]), "participant-approval", x_idempotency_key
+            )
             if _check_idempotency(
                 cur,
                 workspace_id=str(case["workspace_id"]),
@@ -667,12 +759,15 @@ def get_onboarding_case(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_assertion: str | None = Header(None, alias="X-DigitalMe-Assertion"),
 ):
     principal, _, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_assertion,
     )
+    case_id = _normalize_uuid(case_id, "case_id")
     with get_conn() as conn:
         with conn.cursor() as cur:
             return _load_case(cur, case_id, principal, actor_user_id)

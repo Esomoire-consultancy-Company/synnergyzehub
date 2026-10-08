@@ -13,7 +13,7 @@
 
 ```bash
 cd infra
-docker compose up -d
+docker compose --env-file ../.env up -d
 ```
 
 ## Check API

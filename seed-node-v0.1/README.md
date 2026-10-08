@@ -57,9 +57,19 @@ When `DIGITALME_TRUSTED_INGRESS=true`, the trusted VSR/DigitalMe gateway must su
 - `X-DigitalMe-Principal`;
 - `X-DigitalMe-Verification-Ref`;
 - `X-Actor-User-Id`;
+- `X-DigitalMe-Assertion`;
 - `X-Idempotency-Key` on mutations.
 
-The API then confirms that the actor user is an active member of the target workspace. Without trusted ingress the GMT API fails closed.
+The assertion is the lowercase hexadecimal HMAC-SHA256 of the compact JSON array
+`[principal, verification_ref, canonical_actor_user_uuid]`, using the shared
+`DIGITALME_TRUSTED_INGRESS_SECRET`. The gateway must strip client-supplied
+identity and assertion headers, then replace them with its verified identity
+claims and a newly signed assertion. Configure the same secret in the gateway
+and API through a secret manager; use a secret of at least 32 bytes and do not
+expose it to clients. The API then confirms that the actor user is an active
+member of the target workspace.
+Without a valid assertion, or when trusted ingress is not enabled, the GMT API
+fails closed.
 
 ### Database bootstrap
 
