@@ -1,7 +1,8 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import json
 from app.db import get_conn
+from app.riveros_search import SEARCH_SQL, plan_search
 
 app = FastAPI(title="Synnergyze Seed Node API", version="0.1.0")
 
@@ -129,3 +130,33 @@ def list_evidence_events(workspace_id: str):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM riveros.evidence_events WHERE workspace_id = %s ORDER BY created_at DESC LIMIT 100", (workspace_id,))
             return {"events": cur.fetchall()}
+
+
+class RiverOSSearchRequest(BaseModel):
+    workspace_id: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/riveros/search/plan")
+def plan_riveros_search(payload: RiverOSSearchRequest):
+    plan = plan_search(payload.workspace_id, payload.query)
+    return {
+        "mode": "plan_only",
+        "read_only": True,
+        "plan": plan.to_dict(),
+    }
+
+
+@app.post("/riveros/search")
+def search_riveros(payload: RiverOSSearchRequest):
+    plan = plan_search(payload.workspace_id, payload.query)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(SEARCH_SQL, plan.sql_parameters())
+            events = cur.fetchall()
+    return {
+        "mode": "executed",
+        "read_only": True,
+        "plan": plan.to_dict(),
+        "events": events,
+    }
