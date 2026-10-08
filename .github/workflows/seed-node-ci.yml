@@ -2,7 +2,6 @@ name: Seed Node CI
 
 on:
   push:
-    branches: [ main ]
     paths:
       - "seed-node-v0.1/**"
       - ".github/workflows/seed-node-ci.yml"
