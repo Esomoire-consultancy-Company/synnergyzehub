@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -58,39 +59,69 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _require_trusted_digitalme(
+def _payload_hash(value: dict) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _require_trusted_context(
     principal: str | None,
     verification_ref: str | None,
-) -> tuple[str, str]:
-    # R0.1 intentionally has no identity-verification engine.
-    # It only accepts identity asserted by a trusted upstream VSR/DigitalMe ingress.
-    # Default is fail-closed so this cannot be mistaken for production verification.
+    actor_user_id: str | None,
+) -> tuple[str, str, str]:
+    # R0.1 does not implement an identity-verification engine.
+    # It accepts identity only from a trusted upstream VSR/DigitalMe ingress and
+    # defaults to fail-closed so development headers cannot be mistaken for proof.
     if os.getenv("DIGITALME_TRUSTED_INGRESS", "").lower() != "true":
         raise HTTPException(
             status_code=503,
             detail="DigitalMe trusted ingress is not enabled; onboarding remains on HOLD.",
         )
-    if not principal or not verification_ref:
+    if not principal or not verification_ref or not actor_user_id:
         raise HTTPException(
             status_code=401,
-            detail="Verified DigitalMe principal and verification reference are required.",
+            detail=(
+                "Verified DigitalMe principal, verification reference, and "
+                "workspace actor user are required."
+            ),
         )
-    return principal, verification_ref
+    return principal, verification_ref, actor_user_id
 
 
-def _load_case(cur, case_id: str, principal: str):
+def _require_workspace_membership(cur, workspace_id: str, actor_user_id: str):
+    cur.execute(
+        """
+        SELECT 1
+          FROM workspace.members
+         WHERE workspace_id = %s
+           AND user_id = %s
+           AND status = 'active'
+         LIMIT 1
+        """,
+        (workspace_id, actor_user_id),
+    )
+    if not cur.fetchone():
+        raise HTTPException(
+            status_code=403,
+            detail="The verified actor is not an active member of this workspace.",
+        )
+
+
+def _load_case(cur, case_id: str, principal: str, actor_user_id: str):
     cur.execute(
         """
         SELECT *
           FROM gmt.onboarding_cases
          WHERE id = %s
            AND digitalme_principal = %s
+           AND actor_user_id = %s
         """,
-        (case_id, principal),
+        (case_id, principal, actor_user_id),
     )
     case = cur.fetchone()
     if not case:
         raise HTTPException(status_code=404, detail="Onboarding case not found.")
+    _require_workspace_membership(cur, str(case["workspace_id"]), actor_user_id)
     return case
 
 
@@ -102,10 +133,79 @@ def _require_state(case, allowed: set[str]):
         )
 
 
+def _check_idempotency(
+    cur,
+    *,
+    workspace_id: str,
+    case_id: str,
+    scope: str,
+    idempotency_key: str,
+    request_hash: str,
+) -> bool:
+    cur.execute(
+        """
+        SELECT request_hash
+          FROM gmt.idempotency_records
+         WHERE workspace_id = %s
+           AND scope = %s
+           AND idempotency_key = %s
+        """,
+        (workspace_id, scope, idempotency_key),
+    )
+    record = cur.fetchone()
+    if not record:
+        return False
+    if record["request_hash"] != request_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key was already used with a different request.",
+        )
+    cur.execute(
+        "SELECT 1 FROM gmt.onboarding_cases WHERE id = %s AND workspace_id = %s",
+        (case_id, workspace_id),
+    )
+    if not cur.fetchone():
+        raise HTTPException(status_code=409, detail="Idempotency record is inconsistent.")
+    return True
+
+
+def _record_idempotency(
+    cur,
+    *,
+    workspace_id: str,
+    case_id: str,
+    scope: str,
+    idempotency_key: str,
+    request_hash: str,
+    resulting_state: str,
+):
+    cur.execute(
+        """
+        INSERT INTO gmt.idempotency_records (
+          workspace_id,
+          case_id,
+          scope,
+          idempotency_key,
+          request_hash,
+          resulting_state
+        ) VALUES (%s,%s,%s,%s,%s,%s)
+        """,
+        (
+            workspace_id,
+            case_id,
+            scope,
+            idempotency_key,
+            request_hash,
+            resulting_state,
+        ),
+    )
+
+
 def _emit_river_event(
     cur,
     *,
     workspace_id: str,
+    actor_user_id: str,
     principal: str,
     object_id: str,
     action: str,
@@ -127,6 +227,7 @@ def _emit_river_event(
           source_environment,
           idempotency_key,
           actor_type,
+          actor_user_id,
           digitalme_principal,
           object_type,
           object_id,
@@ -142,7 +243,7 @@ def _emit_river_event(
           metadata
         ) VALUES (
           %s,%s,'0.2',%s,%s,%s,%s,
-          'user',%s,'gmt_onboarding_case',%s,%s,
+          'user',%s,%s,'gmt_onboarding_case',%s,%s,
           %s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,
           FALSE,'not_applicable','APPLIED',NOW(),%s::jsonb
         )
@@ -156,6 +257,7 @@ def _emit_river_event(
             SOURCE_SYSTEM,
             os.getenv("ENVIRONMENT", "development"),
             idempotency_key,
+            actor_user_id,
             principal,
             object_id,
             WORKFLOW_ID,
@@ -165,7 +267,10 @@ def _emit_river_event(
                 {
                     "digitalme_verification_ref": verification_ref,
                     "warden_authority": None,
-                    "note": "Grow My Trade R0.1 discovery only; no protected execution authority granted.",
+                    "note": (
+                        "Grow My Trade R0.1 discovery only; "
+                        "no protected execution authority granted."
+                    ),
                 }
             ),
             json.dumps(consent_context or {}),
@@ -187,10 +292,12 @@ def create_onboarding_case(
     x_digitalme_verification_ref: str | None = Header(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
+    x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
 ):
-    principal, verification_ref = _require_trusted_digitalme(
+    principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
+        x_actor_user_id,
     )
     if not payload.rights_acknowledged:
         raise HTTPException(
@@ -200,12 +307,7 @@ def create_onboarding_case(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM workspace.workspaces WHERE id = %s",
-                (payload.workspace_id,),
-            )
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Workspace not found.")
+            _require_workspace_membership(cur, payload.workspace_id, actor_user_id)
 
             cur.execute(
                 """
@@ -218,12 +320,21 @@ def create_onboarding_case(
             )
             existing = cur.fetchone()
             if existing:
+                if (
+                    existing["digitalme_principal"] != principal
+                    or str(existing["actor_user_id"]) != actor_user_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency key belongs to a different verified actor.",
+                    )
                 return existing
 
             cur.execute(
                 """
                 INSERT INTO gmt.onboarding_cases (
                   workspace_id,
+                  actor_user_id,
                   digitalme_principal,
                   digitalme_verification_ref,
                   state,
@@ -232,12 +343,13 @@ def create_onboarding_case(
                   rights_acknowledged_at,
                   create_idempotency_key
                 ) VALUES (
-                  %s,%s,%s,'IDENTITY_VERIFIED',%s,%s::jsonb,NOW(),%s
+                  %s,%s,%s,%s,'IDENTITY_VERIFIED',%s,%s::jsonb,NOW(),%s
                 )
                 RETURNING *
                 """,
                 (
                     payload.workspace_id,
+                    actor_user_id,
                     principal,
                     verification_ref,
                     RIGHTS_VERSION,
@@ -250,6 +362,7 @@ def create_onboarding_case(
             _emit_river_event(
                 cur,
                 workspace_id=payload.workspace_id,
+                actor_user_id=actor_user_id,
                 principal=principal,
                 object_id=str(case["id"]),
                 action="create_onboarding_case",
@@ -276,11 +389,14 @@ def submit_discovery(
     x_digitalme_verification_ref: str | None = Header(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
+    x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
 ):
-    principal, verification_ref = _require_trusted_digitalme(
+    principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
+        x_actor_user_id,
     )
+    request_hash = _payload_hash(payload.model_dump())
 
     business_declaration = {
         "legal_name": payload.legal_name,
@@ -300,10 +416,20 @@ def submit_discovery(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            case = _load_case(cur, case_id, principal)
-            _require_state(case, {"IDENTITY_VERIFIED", "BUSINESS_DECLARED"})
+            case = _load_case(cur, case_id, principal, actor_user_id)
+            if _check_idempotency(
+                cur,
+                workspace_id=str(case["workspace_id"]),
+                case_id=case_id,
+                scope="business-discovery",
+                idempotency_key=x_idempotency_key,
+                request_hash=request_hash,
+            ):
+                return case
 
+            _require_state(case, {"IDENTITY_VERIFIED", "BUSINESS_DECLARED"})
             previous = {"state": case["state"]}
+
             cur.execute(
                 """
                 UPDATE gmt.onboarding_cases
@@ -324,9 +450,19 @@ def submit_discovery(
             )
             updated = cur.fetchone()
 
+            _record_idempotency(
+                cur,
+                workspace_id=str(updated["workspace_id"]),
+                case_id=case_id,
+                scope="business-discovery",
+                idempotency_key=x_idempotency_key,
+                request_hash=request_hash,
+                resulting_state="BUSINESS_DECLARED",
+            )
             _emit_river_event(
                 cur,
                 workspace_id=str(updated["workspace_id"]),
+                actor_user_id=actor_user_id,
                 principal=principal,
                 object_id=case_id,
                 action="submit_business_discovery",
@@ -353,14 +489,18 @@ def record_plan(
     x_digitalme_verification_ref: str | None = Header(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
+    x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
 ):
-    principal, verification_ref = _require_trusted_digitalme(
+    principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
+        x_actor_user_id,
     )
+    request_hash = _payload_hash(payload.model_dump())
 
     plan = {
         "status": "draft",
+        "source": "synnergyze",
         "proposed_business_model": payload.proposed_business_model,
         "operating_scope": payload.operating_scope,
         "capability_gaps": payload.capability_gaps,
@@ -371,10 +511,20 @@ def record_plan(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            case = _load_case(cur, case_id, principal)
-            _require_state(case, {"BUSINESS_DECLARED", "PLAN_READY"})
+            case = _load_case(cur, case_id, principal, actor_user_id)
+            if _check_idempotency(
+                cur,
+                workspace_id=str(case["workspace_id"]),
+                case_id=case_id,
+                scope="business-plan",
+                idempotency_key=x_idempotency_key,
+                request_hash=request_hash,
+            ):
+                return case
 
+            _require_state(case, {"BUSINESS_DECLARED", "PLAN_READY"})
             previous = {"state": case["state"]}
+
             cur.execute(
                 """
                 UPDATE gmt.onboarding_cases
@@ -388,9 +538,19 @@ def record_plan(
             )
             updated = cur.fetchone()
 
+            _record_idempotency(
+                cur,
+                workspace_id=str(updated["workspace_id"]),
+                case_id=case_id,
+                scope="business-plan",
+                idempotency_key=x_idempotency_key,
+                request_hash=request_hash,
+                resulting_state="PLAN_READY",
+            )
             _emit_river_event(
                 cur,
                 workspace_id=str(updated["workspace_id"]),
+                actor_user_id=actor_user_id,
                 principal=principal,
                 object_id=case_id,
                 action="record_synnergyze_plan",
@@ -413,17 +573,37 @@ def participant_approval(
     x_digitalme_verification_ref: str | None = Header(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
+    x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
 ):
-    principal, verification_ref = _require_trusted_digitalme(
+    principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
+        x_actor_user_id,
     )
+    request_hash = _payload_hash(payload.model_dump())
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            case = _load_case(cur, case_id, principal)
-            _require_state(case, {"PLAN_READY", "HOLD_FOR_ESTATE_LICENSE"})
+            case = _load_case(cur, case_id, principal, actor_user_id)
+            if _check_idempotency(
+                cur,
+                workspace_id=str(case["workspace_id"]),
+                case_id=case_id,
+                scope="participant-approval",
+                idempotency_key=x_idempotency_key,
+                request_hash=request_hash,
+            ):
+                return {
+                    "case": case,
+                    "next_gate": (
+                        "VIRTUAL_ESTATE_LICENSE"
+                        if case["state"] == "HOLD_FOR_ESTATE_LICENSE"
+                        else "SYNNERGYZE_PLAN_REVISION"
+                    ),
+                    "protected_execution_authorized": False,
+                }
 
+            _require_state(case, {"PLAN_READY", "HOLD_FOR_ESTATE_LICENSE"})
             target_state = "HOLD_FOR_ESTATE_LICENSE" if payload.accepted else "PLAN_READY"
             previous = {"state": case["state"]}
 
@@ -439,9 +619,19 @@ def participant_approval(
             )
             updated = cur.fetchone()
 
+            _record_idempotency(
+                cur,
+                workspace_id=str(updated["workspace_id"]),
+                case_id=case_id,
+                scope="participant-approval",
+                idempotency_key=x_idempotency_key,
+                request_hash=request_hash,
+                resulting_state=target_state,
+            )
             _emit_river_event(
                 cur,
                 workspace_id=str(updated["workspace_id"]),
+                actor_user_id=actor_user_id,
                 principal=principal,
                 object_id=case_id,
                 action="participant_plan_decision",
@@ -463,7 +653,7 @@ def participant_approval(
         "next_gate": (
             "VIRTUAL_ESTATE_LICENSE"
             if payload.accepted
-            else "SYN NERGYZE_PLAN_REVISION".replace(" ", "")
+            else "SYNNERGYZE_PLAN_REVISION"
         ),
         "protected_execution_authorized": False,
     }
@@ -476,11 +666,13 @@ def get_onboarding_case(
     x_digitalme_verification_ref: str | None = Header(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
+    x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
 ):
-    principal, _ = _require_trusted_digitalme(
+    principal, _, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
+        x_actor_user_id,
     )
     with get_conn() as conn:
         with conn.cursor() as cur:
-            return _load_case(cur, case_id, principal)
+            return _load_case(cur, case_id, principal, actor_user_id)
