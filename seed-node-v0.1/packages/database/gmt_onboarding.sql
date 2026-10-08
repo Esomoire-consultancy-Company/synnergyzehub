@@ -7,6 +7,7 @@ CREATE SCHEMA IF NOT EXISTS gmt;
 CREATE TABLE IF NOT EXISTS gmt.onboarding_cases (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
+  actor_user_id UUID NOT NULL REFERENCES platform.users(id) ON DELETE RESTRICT,
   digitalme_principal TEXT NOT NULL,
   digitalme_verification_ref TEXT NOT NULL,
 
@@ -39,11 +40,26 @@ CREATE TABLE IF NOT EXISTS gmt.onboarding_cases (
   UNIQUE (workspace_id, create_idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS gmt.idempotency_records (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
+  case_id UUID NOT NULL REFERENCES gmt.onboarding_cases(id) ON DELETE RESTRICT,
+  scope TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  resulting_state TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, scope, idempotency_key)
+);
+
 CREATE INDEX IF NOT EXISTS gmt_onboarding_cases_workspace_state_idx
   ON gmt.onboarding_cases (workspace_id, state, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS gmt_onboarding_cases_principal_idx
   ON gmt.onboarding_cases (workspace_id, digitalme_principal, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS gmt_onboarding_cases_actor_idx
+  ON gmt.onboarding_cases (workspace_id, actor_user_id, updated_at DESC);
 
 COMMENT ON TABLE gmt.onboarding_cases IS
   'Synnergyze mutable state for Grow My Trade. It does not transfer ownership of a participant business, customers, IP, banking, tax responsibilities, or lawful external trade to VSR.';
