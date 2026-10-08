@@ -2,8 +2,10 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import json
 from app.db import get_conn
+from app.gmt import router as gmt_router
 
 app = FastAPI(title="Synnergyze Seed Node API", version="0.1.0")
+app.include_router(gmt_router)
 
 @app.get("/health")
 def health():
