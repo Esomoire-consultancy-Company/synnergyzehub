@@ -57,9 +57,14 @@ When `DIGITALME_TRUSTED_INGRESS=true`, the trusted VSR/DigitalMe gateway must su
 - `X-DigitalMe-Principal`;
 - `X-DigitalMe-Verification-Ref`;
 - `X-Actor-User-Id`;
+- `X-DigitalMe-Ingress-Token`;
 - `X-Idempotency-Key` on mutations.
 
-The API then confirms that the actor user is an active member of the target workspace. Without trusted ingress the GMT API fails closed.
+The API validates `X-DigitalMe-Ingress-Token` against the server-side
+`DIGITALME_INGRESS_SECRET` before trusting the identity headers, then confirms
+that the actor user is an active member of the target workspace. Configure the
+same high-entropy secret only in the trusted gateway and API secret manager.
+Without trusted ingress and its configured secret, the GMT API fails closed.
 
 ### Database bootstrap
 

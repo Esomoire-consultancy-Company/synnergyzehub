@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import os
 from datetime import datetime, timezone
@@ -69,14 +70,23 @@ def _require_trusted_context(
     principal: str | None,
     verification_ref: str | None,
     actor_user_id: str | None,
+    ingress_token: str | None = None,
 ) -> tuple[str, str, str]:
     # R0.1 does not implement an identity-verification engine.
-    # It accepts identity only from a trusted upstream VSR/DigitalMe ingress and
-    # defaults to fail-closed so development headers cannot be mistaken for proof.
-    if os.getenv("DIGITALME_TRUSTED_INGRESS", "").lower() != "true":
+    # The gateway credential authenticates the upstream identity headers.
+    ingress_secret = os.getenv("DIGITALME_INGRESS_SECRET")
+    if (
+        os.getenv("DIGITALME_TRUSTED_INGRESS", "").lower() != "true"
+        or not ingress_secret
+    ):
         raise HTTPException(
             status_code=503,
             detail="DigitalMe trusted ingress is not enabled; onboarding remains on HOLD.",
+        )
+    if not ingress_token or not hmac.compare_digest(ingress_token, ingress_secret):
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated DigitalMe ingress is required.",
         )
     if not principal or not verification_ref or not actor_user_id:
         raise HTTPException(
@@ -87,6 +97,17 @@ def _require_trusted_context(
             ),
         )
     return principal, verification_ref, actor_user_id
+
+
+def _lock_idempotency_key(cur, workspace_id: str, scope: str, idempotency_key: str):
+    lock_key = json.dumps(
+        [str(workspace_id), scope, idempotency_key],
+        separators=(",", ":"),
+    )
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (lock_key,),
+    )
 
 
 def _require_workspace_membership(cur, workspace_id: str, actor_user_id: str):
@@ -152,6 +173,7 @@ def _check_idempotency(
     idempotency_key: str,
     request_hash: str,
 ) -> bool:
+    _lock_idempotency_key(cur, workspace_id, scope, idempotency_key)
     cur.execute(
         """
         SELECT request_hash, case_id
@@ -308,11 +330,15 @@ def create_onboarding_case(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_ingress_token: str | None = Header(
+        None, alias="X-DigitalMe-Ingress-Token"
+    ),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_ingress_token,
     )
     if not payload.rights_acknowledged:
         raise HTTPException(
@@ -323,6 +349,12 @@ def create_onboarding_case(
     with get_conn() as conn:
         with conn.cursor() as cur:
             _require_workspace_membership(cur, payload.workspace_id, actor_user_id)
+            _lock_idempotency_key(
+                cur,
+                payload.workspace_id,
+                "onboarding-case-create",
+                x_idempotency_key,
+            )
 
             cur.execute(
                 """
@@ -338,6 +370,7 @@ def create_onboarding_case(
                 if (
                     existing["digitalme_principal"] != principal
                     or str(existing["actor_user_id"]) != actor_user_id
+                    or existing["digitalme_verification_ref"] != verification_ref
                 ):
                     raise HTTPException(
                         status_code=409,
@@ -405,11 +438,15 @@ def submit_discovery(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_ingress_token: str | None = Header(
+        None, alias="X-DigitalMe-Ingress-Token"
+    ),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_ingress_token,
     )
     request_hash = _payload_hash(payload.model_dump())
 
@@ -505,11 +542,15 @@ def record_plan(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_ingress_token: str | None = Header(
+        None, alias="X-DigitalMe-Ingress-Token"
+    ),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_ingress_token,
     )
     request_hash = _payload_hash(payload.model_dump())
 
@@ -589,11 +630,15 @@ def participant_approval(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_ingress_token: str | None = Header(
+        None, alias="X-DigitalMe-Ingress-Token"
+    ),
 ):
     principal, verification_ref, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_ingress_token,
     )
     request_hash = _payload_hash(payload.model_dump())
 
@@ -682,11 +727,15 @@ def get_onboarding_case(
         None, alias="X-DigitalMe-Verification-Ref"
     ),
     x_actor_user_id: str | None = Header(None, alias="X-Actor-User-Id"),
+    x_digitalme_ingress_token: str | None = Header(
+        None, alias="X-DigitalMe-Ingress-Token"
+    ),
 ):
     principal, _, actor_user_id = _require_trusted_context(
         x_digitalme_principal,
         x_digitalme_verification_ref,
         x_actor_user_id,
+        x_digitalme_ingress_token,
     )
     with get_conn() as conn:
         with conn.cursor() as cur:

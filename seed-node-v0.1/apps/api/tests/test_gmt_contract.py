@@ -25,8 +25,26 @@ class GrowMyTradeContractTests(unittest.TestCase):
 
     def test_trusted_context_requires_actor_binding(self):
         os.environ["DIGITALME_TRUSTED_INGRESS"] = "true"
+        os.environ["DIGITALME_INGRESS_SECRET"] = "trusted-gateway-secret"
         with self.assertRaises(HTTPException) as ctx:
-            gmt._require_trusted_context("dm:test", "proof:test", None)
+            gmt._require_trusted_context(
+                "dm:test",
+                "proof:test",
+                None,
+                "trusted-gateway-secret",
+            )
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_trusted_context_rejects_forged_ingress_token(self):
+        os.environ["DIGITALME_TRUSTED_INGRESS"] = "true"
+        os.environ["DIGITALME_INGRESS_SECRET"] = "trusted-gateway-secret"
+        with self.assertRaises(HTTPException) as ctx:
+            gmt._require_trusted_context(
+                "dm:test",
+                "proof:test",
+                "user-test",
+                "forged-token",
+            )
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_request_hash_is_deterministic(self):
@@ -52,7 +70,23 @@ class GrowMyTradeContractTests(unittest.TestCase):
             )
 
         self.assertEqual(ctx.exception.status_code, 409)
-        cur.execute.assert_called_once()
+        self.assertEqual(cur.execute.call_count, 2)
+
+    def test_mutation_idempotency_uses_transaction_scoped_lock(self):
+        cur = Mock()
+        cur.fetchone.return_value = None
+
+        replayed = gmt._check_idempotency(
+            cur,
+            workspace_id="workspace",
+            case_id="00000000-0000-0000-0000-000000000001",
+            scope="business-discovery",
+            idempotency_key="request-key",
+            request_hash="request-hash",
+        )
+
+        self.assertFalse(replayed)
+        self.assertIn("pg_advisory_xact_lock", cur.execute.call_args_list[0].args[0])
 
     def test_idempotency_replay_matches_uuid_formatting(self):
         cur = Mock()
