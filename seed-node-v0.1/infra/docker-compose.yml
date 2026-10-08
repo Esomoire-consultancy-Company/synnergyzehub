@@ -11,7 +11,9 @@ services:
       - "5432:5432"
     volumes:
       - synnergyze_pgdata:/var/lib/postgresql/data
-      - ../packages/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../packages/database/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ../packages/riveros/schema.sql:/docker-entrypoint-initdb.d/20-riveros.sql:ro
+      - ../packages/database/gmt_onboarding.sql:/docker-entrypoint-initdb.d/30-gmt-onboarding.sql:ro
 
   redis:
     image: redis:7
